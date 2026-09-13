@@ -3,20 +3,29 @@ import type { StyleSpecification } from 'maplibre-gl';
 /**
  * CARTO raster basemap.
  *
- * The key is optional: these tiles serve publicly, and Vite inlines any
- * `VITE_*` value into the client bundle, so this is a referrer-restricted
- * public key rather than a secret. Set it in `.env.local` (gitignored).
+ * CARTO has required an API key on these tiles since Aug 2026 — without one
+ * they are served with an "API KEY REQUIRED" watermark. Keys are free up to
+ * 5M tile requests/month: https://carto.com/basemaps/apikey
+ *
+ * Vite inlines any `VITE_*` value into the client bundle, so this is a
+ * referrer-restricted public key, not a secret. Set it in `.env.local`.
  */
 const BASEMAP_KEY = import.meta.env.VITE_BASEMAP_KEY;
 
-/** 'dark_all' matches the dashboard shell; 'voyager' and 'light_all' are light. */
-const VARIANT = 'dark_all';
+/**
+ * Style path. Note the paths are not uniform: the voyager styles are nested
+ * under `rastertiles/`, while the light and dark ones sit at the root.
+ *
+ * Valid values: 'dark_all', 'dark_nolabels', 'light_all', 'light_nolabels',
+ * 'rastertiles/voyager', 'rastertiles/voyager_nolabels'.
+ */
+const STYLE = 'dark_all';
 
-const SUBDOMAINS = ['a', 'b', 'c'];
+const SUBDOMAINS = ['a', 'b', 'c', 'd'];
 
 function tileUrl(subdomain: string): string {
   const query = BASEMAP_KEY ? `?key=${encodeURIComponent(BASEMAP_KEY)}` : '';
-  return `https://${subdomain}.basemaps.cartocdn.com/rastertiles/${VARIANT}/{z}/{x}/{y}@2x.png${query}`;
+  return `https://${subdomain}.basemaps.cartocdn.com/${STYLE}/{z}/{x}/{y}@2x.png${query}`;
 }
 
 export const BASE_STYLE: StyleSpecification = {
