@@ -21,7 +21,7 @@ export function CapPanel() {
 
   return (
     <Panel
-      title="CAP alert & dissemination"
+      title="CAP alerts"
       actions={
         <div className="flex gap-1">
           {(['summary', 'xml'] as const).map((option) => (
@@ -31,7 +31,7 @@ export function CapPanel() {
               onClick={() => setView(option)}
               className={`chip ${view === option ? 'chip-active' : ''}`}
             >
-              {option === 'summary' ? 'Summary' : 'CAP XML'}
+              {option === 'summary' ? 'Summary' : 'XML'}
             </button>
           ))}
         </div>
@@ -40,9 +40,11 @@ export function CapPanel() {
     >
       {view === 'summary' ? (
         <>
-          <p className="text-sm font-semibold text-slate-100">{alert.headline}</p>
+          <p className="font-display text-base font-semibold tracking-wide text-cyan-50">
+            {alert.headline}
+          </p>
           <p className="text-xs leading-relaxed text-slate-400">{alert.description}</p>
-          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs
+          <p className="clip-bevel border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs
             leading-relaxed text-amber-200">
             {alert.instruction}
           </p>
@@ -60,24 +62,26 @@ export function CapPanel() {
           </dl>
         </>
       ) : (
-        <pre className="overflow-x-auto rounded-lg bg-surface p-3 font-mono text-[10px]
+        <pre className="clip-bevel overflow-x-auto border border-surface-hairline
+          bg-surface-deep/80 p-3 font-mono text-[10px]
           leading-relaxed text-slate-400 scroll-thin">
           {capToXml(alert)}
         </pre>
       )}
 
-      <div className="space-y-1.5 border-t border-surface-border pt-3">
+      <div className="space-y-1.5 border-t border-surface-hairline pt-3">
         {CHANNELS.map((channel) => (
           <div
             key={channel.id}
-            className="flex items-center justify-between rounded-md bg-surface px-3 py-1.5"
+            className="clip-bevel flex items-center justify-between border
+              border-surface-hairline bg-surface-deep/60 px-3 py-1.5"
           >
             <div>
               <p className="text-xs text-slate-300">{channel.label}</p>
-              <p className="text-[10px] text-slate-500">{channel.detail}</p>
+              <p className="font-mono text-[10px] tracking-wide text-slate-500">{channel.detail}</p>
             </div>
-            <span className="rounded bg-slate-800 px-2 py-0.5 text-[10px] uppercase tracking-wide
-              text-slate-500">
+            <span className="border border-slate-700 px-2 py-0.5 font-mono text-[9px] uppercase
+              tracking-[0.14em] text-slate-500">
               Not wired
             </span>
           </div>

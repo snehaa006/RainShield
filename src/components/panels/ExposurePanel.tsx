@@ -11,7 +11,7 @@ export function ExposurePanel() {
 
   return (
     <Panel
-      title="Critical infrastructure exposed"
+      title="Infrastructure exposure"
       actions={<span className="text-[11px] text-slate-500">{exposed.length} assets</span>}
       bodyClassName="min-h-0 flex-1 overflow-y-auto scroll-thin p-2"
     >
@@ -25,19 +25,25 @@ export function ExposurePanel() {
           {exposed.map((asset) => (
             <li
               key={asset.id}
-              className="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-surface"
+              className="clip-bevel flex items-center gap-3 border border-transparent px-2 py-1.5
+                transition-colors hover:border-hud/30 hover:bg-hud/5"
             >
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full
-                bg-slate-800 text-xs text-slate-300">
+                border border-hud/30 bg-hud/10 text-xs text-cyan-200">
                 {INFRA_ICONS[asset.type]}
               </span>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-xs text-slate-200">{asset.name}</p>
-                <p className="text-[10px] text-slate-500">{INFRA_LABELS[asset.type]}</p>
+                <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-slate-500">
+                  {INFRA_LABELS[asset.type]}
+                </p>
               </div>
               <span
-                className="shrink-0 text-xs font-semibold tabular-nums"
-                style={{ color: asset.depth >= 0.6 ? '#f87171' : '#fbbf24' }}
+                className="shrink-0 font-display text-sm font-bold tabular-nums"
+                style={{
+                  color: asset.depth >= 0.6 ? '#f87171' : '#fbbf24',
+                  textShadow: `0 0 12px ${asset.depth >= 0.6 ? '#f8717180' : '#fbbf2480'}`,
+                }}
               >
                 {metres(asset.depth)}
               </span>

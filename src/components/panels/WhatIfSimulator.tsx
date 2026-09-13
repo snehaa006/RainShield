@@ -66,7 +66,7 @@ export function WhatIfSimulator() {
         hint="Fraction of design capacity — drops when inlets choke"
       />
 
-      <div className="grid grid-cols-3 gap-2 border-t border-surface-border pt-3">
+      <div className="grid grid-cols-3 gap-2 border-t border-surface-hairline pt-3">
         <Delta
           label="Population at risk"
           base={baseline.populationAtRisk}
@@ -107,8 +107,10 @@ function Delta({
   return (
     <div>
       <p className="stat-label">{label}</p>
-      <p className="text-sm font-semibold tabular-nums text-slate-100">{format(next)}</p>
-      <p className={`text-[11px] tabular-nums ${tone}`}>
+      <p className="font-display text-base font-bold tabular-nums text-cyan-50 neon-text">
+        {format(next)}
+      </p>
+      <p className={`font-mono text-[10px] tabular-nums ${tone}`}>
         {change === 0 ? 'no change' : `${change > 0 ? '+' : '−'}${format(Math.abs(change))}`}
       </p>
     </div>

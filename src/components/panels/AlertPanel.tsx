@@ -18,18 +18,23 @@ export function AlertPanel() {
       actions={
         selectedWard ? (
           <button type="button" className="chip" onClick={() => selectWard(null)}>
-            Show highest risk
+            Reset
           </button>
         ) : (
-          <span className="text-[11px] text-slate-500">Highest-risk ward</span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-slate-500">
+            Top ward
+          </span>
         )
       }
       bodyClassName="space-y-4 p-4"
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="text-lg font-semibold text-slate-100">{ward.ward.name}</h3>
-          <p className="text-xs text-slate-500">
+          <h3 className="font-display text-2xl font-bold uppercase tracking-[0.08em]
+            text-cyan-50 neon-text">
+            {ward.ward.name}
+          </h3>
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-slate-500">
             {ward.floodedCellCount} of {ward.cellCount} km² cells flooding
           </p>
         </div>
@@ -47,7 +52,7 @@ export function AlertPanel() {
           label="Expected water depth"
           value={Math.min(1, ward.peakWaterDepth / 1.5)}
           display={metres(ward.peakWaterDepth)}
-          color="#0891b2"
+          color="#22d3ee"
           hint={depthContext(ward.peakWaterDepth)}
         />
         <Meter
@@ -58,7 +63,7 @@ export function AlertPanel() {
         />
       </div>
 
-      <dl className="grid grid-cols-3 gap-3 border-t border-surface-border pt-3">
+      <dl className="grid grid-cols-3 gap-3 border-t border-surface-hairline pt-3">
         <Field label="Time to inundation" value={duration(ward.timeToInundation)}
           hint={ward.timeToInundation !== null ? `~${clockAt(ward.timeToInundation)} IST` : 'no onset'} />
         <Field label="Population at risk" value={compactNumber(ward.populationAtRisk)}
@@ -88,10 +93,16 @@ function Field({
   return (
     <div>
       <dt className="stat-label">{label}</dt>
-      <dd className="text-sm font-semibold tabular-nums" style={{ color: color ?? '#e2e8f0' }}>
+      <dd
+        className="font-display text-base font-bold tabular-nums"
+        style={{
+          color: color ?? '#cffafe',
+          textShadow: `0 0 12px ${(color ?? '#22d3ee')}80`,
+        }}
+      >
         {value}
       </dd>
-      <dd className="text-[11px] text-slate-500">{hint}</dd>
+      <dd className="font-mono text-[10px] tracking-wide text-slate-500">{hint}</dd>
     </div>
   );
 }

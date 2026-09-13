@@ -8,17 +8,24 @@ export function MapLegend() {
   const { activeLayer } = useDashboard();
 
   return (
-    <div className="pointer-events-auto w-56 rounded-lg border border-surface-border
-      bg-surface/90 p-3 backdrop-blur">
+    <div className="pointer-events-auto w-56 border border-surface-border bg-surface-deep/85 p-3
+      backdrop-blur-md clip-notch shadow-[0_0_24px_-10px_rgba(34,211,238,0.8)]">
       {activeLayer === 'risk' ? (
         <>
-          <p className="stat-label mb-2">Warning tier</p>
+          <p className="stat-label mb-2 text-hud/70">Warning tier</p>
           <ul className="space-y-1.5">
             {TIERS.map((tier) => (
-              <li key={tier} className="flex items-center gap-2 text-xs text-slate-300">
+              <li
+                key={tier}
+                className="flex items-center gap-2 font-mono text-[11px] uppercase
+                  tracking-[0.1em] text-slate-300"
+              >
                 <span
-                  className="h-2.5 w-2.5 rounded-sm"
-                  style={{ backgroundColor: TIER_COLORS[tier] }}
+                  className="h-2.5 w-2.5 rotate-45"
+                  style={{
+                    backgroundColor: TIER_COLORS[tier],
+                    boxShadow: `0 0 8px 0 ${TIER_COLORS[tier]}`,
+                  }}
                 />
                 {TIER_LABELS[tier]}
               </li>
@@ -51,11 +58,17 @@ function Ramp({
 
   return (
     <>
-      <p className="stat-label mb-2">
+      <p className="stat-label mb-2 text-hud/70">
         {label} <span className="text-slate-600">({unit})</span>
       </p>
-      <div className="h-2 rounded-full" style={{ background: `linear-gradient(90deg, ${gradient})` }} />
-      <div className="mt-1 flex justify-between text-[10px] tabular-nums text-slate-500">
+      <div
+        className="h-2.5 border border-surface-hairline"
+        style={{
+          background: `linear-gradient(90deg, ${gradient})`,
+          boxShadow: '0 0 14px -4px rgba(34, 211, 238, 0.9)',
+        }}
+      />
+      <div className="mt-1 flex justify-between font-mono text-[10px] tabular-nums text-slate-500">
         <span>{stops[0].value}</span>
         <span>{stops[Math.floor(stops.length / 2)].value}</span>
         <span>{stops.at(-1)!.value}+</span>
