@@ -1,0 +1,81 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    @apply h-full;
+  }
+
+  body {
+    @apply bg-surface text-slate-200 font-sans antialiased;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-xl border border-surface-border bg-surface-raised;
+  }
+
+  .panel-header {
+    @apply flex items-center justify-between gap-3 border-b border-surface-border px-4 py-3;
+  }
+
+  .panel-title {
+    @apply text-xs font-semibold uppercase tracking-wider text-slate-400;
+  }
+
+  .chip {
+    @apply rounded-md border border-surface-border px-2 py-1 text-xs font-medium text-slate-400
+      transition-colors hover:border-slate-500 hover:text-slate-200;
+  }
+
+  .chip-active {
+    @apply border-sky-500/60 bg-sky-500/10 text-sky-300;
+  }
+
+  .stat-label {
+    @apply text-[11px] font-medium uppercase tracking-wide text-slate-500;
+  }
+
+  .stat-value {
+    @apply text-xl font-semibold tabular-nums text-slate-100;
+  }
+
+  .scroll-thin {
+    scrollbar-width: thin;
+    scrollbar-color: #334155 transparent;
+  }
+
+  .scroll-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scroll-thin::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-slate-700;
+  }
+}
+
+/* MapLibre overrides so its chrome matches the dashboard shell. */
+.maplibregl-ctrl-group {
+  @apply border border-surface-border bg-surface-raised;
+}
+
+.maplibregl-ctrl-group button + button {
+  @apply border-t border-surface-border;
+}
+
+.maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+  filter: invert(85%);
+}
+
+.maplibregl-ctrl-attrib {
+  @apply bg-surface/80 text-[10px] text-slate-500;
+}
+
+.maplibregl-ctrl-attrib a {
+  @apply text-slate-400;
+}
