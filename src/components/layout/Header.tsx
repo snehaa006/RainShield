@@ -2,80 +2,64 @@ import { useEffect, useState } from 'react';
 import { REGION, SCENARIOS } from '@/lib/config';
 import { useDashboard } from '@/hooks/useDashboard';
 import { TierBadge } from '@/components/ui/TierBadge';
+import type { ViewId } from '@/views';
+import { VIEWS } from '@/views';
 
-/**
- * Command-bar header: a clipped centre title plate flanked by system telemetry,
- * in the style of an operations big-board.
- */
-export function Header() {
+interface HeaderProps {
+  view: ViewId;
+  onViewChange: (view: ViewId) => void;
+}
+
+/** Product title, primary view tabs and live status. */
+export function Header({ view, onViewChange }: HeaderProps) {
   const { scenario, setScenarioId, regionSummary } = useDashboard();
 
   return (
-    <header className="relative z-20 shrink-0">
-      {/* Angled backdrop plate behind the whole bar. */}
-      <div className="absolute inset-0 border-b border-hud/25 bg-gradient-to-b
-        from-[#0b1c30]/95 via-[#071426]/90 to-transparent backdrop-blur-md" />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r
-        from-transparent via-hud/70 to-transparent" />
-
-      <div className="relative flex items-center justify-between gap-4 px-5 py-2.5">
-        {/* Identity */}
-        <div className="flex shrink-0 items-center gap-3">
-          <div className="relative flex h-10 w-10 items-center justify-center">
-            <span className="absolute inset-0 rounded-full border border-hud/40" />
-            <span className="absolute inset-0 animate-hud-spin rounded-full border border-dashed
-              border-hud/50" />
-            <span className="absolute inset-1.5 rounded-full bg-hud/10 shadow-hud-glow" />
-            <span className="relative text-lg text-cyan-200 neon-text">☂</span>
-          </div>
-          <div>
-            <h1 className="flex items-center font-display text-base font-bold uppercase
-              tracking-[0.22em] text-cyan-50 neon-text">
-              RainShield
-              <span className="ml-1.5 text-hud">AI</span>
-              <span className="ml-2 border border-hud/40 bg-hud/10 px-1.5 py-px font-mono
-                text-[9px] font-medium uppercase tracking-[0.2em] text-hud">
-                Prototype
-              </span>
-            </h1>
-            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-slate-500">
-              {REGION.name} · {REGION.state} · 1 km grid
-            </p>
-          </div>
+    <header className="shrink-0 border-b border-surface-border bg-surface-deep">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-3 px-5 py-3">
+        <div className="shrink-0">
+          <h1 className="text-[17px] font-semibold leading-tight tracking-tight text-white">
+            RainShield AI
+          </h1>
+          <p className="text-[11px] text-slate-500">
+            Flood early warning · {REGION.name}, {REGION.state}
+          </p>
         </div>
 
-        {/* Centre plate — absolutely centred so it stays on the board's axis. */}
-        <div className="pointer-events-none absolute left-1/2 hidden -translate-x-1/2
-          items-center gap-3 min-[1700px]:flex">
-          <span className="h-px w-16 bg-gradient-to-r from-transparent to-hud/60" />
-          <div className="clip-plate border-x border-t border-hud/40 bg-hud/10 px-7 py-1.5">
-            <p className="font-display text-sm font-semibold uppercase tracking-[0.34em]
-              text-cyan-100 neon-text">
-              Flood Command &amp; Early Warning
-            </p>
-          </div>
-          <span className="h-px w-16 bg-gradient-to-l from-transparent to-hud/60" />
-        </div>
-
-        {/* Telemetry */}
-        <div className="flex shrink-0 items-center gap-4">
-          <label className="flex items-center gap-2 font-mono text-[10px] uppercase
-            tracking-[0.16em] text-slate-500">
-            Scenario
-            <select
-              value={scenario.id}
-              onChange={(event) => setScenarioId(event.target.value)}
-              className="clip-bevel border border-hud/30 bg-surface-solid/80 px-2 py-1.5
-                font-sans text-xs normal-case tracking-normal text-cyan-100 outline-none
-                transition-colors hover:border-hud/60 focus:border-hud"
+        <nav className="order-last flex w-full items-center gap-1 overflow-x-auto scroll-thin
+          lg:order-none lg:w-auto lg:flex-1 lg:justify-center">
+          {VIEWS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => onViewChange(item.id)}
+              className={`shrink-0 rounded-[10px] px-3 py-1.5 text-[12px] font-medium
+                transition-colors ${
+                  view === item.id
+                    ? 'bg-accent-soft text-accent'
+                    : 'text-slate-400 hover:bg-white/[0.06] hover:text-slate-200'
+                }`}
             >
-              {SCENARIOS.map((option) => (
-                <option key={option.id} value={option.id} className="bg-surface-solid">
-                  {option.isHistorical ? `↺ ${option.name}` : option.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              {item.label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="ml-auto flex shrink-0 items-center gap-3">
+          <select
+            value={scenario.id}
+            onChange={(event) => setScenarioId(event.target.value)}
+            aria-label="Scenario"
+            className="rounded-[10px] border border-surface-border bg-white/[0.04] px-2.5 py-1.5
+              text-[12px] text-slate-200 outline-none transition-colors hover:bg-white/[0.08]
+              focus:border-accent"
+          >
+            {SCENARIOS.map((option) => (
+              <option key={option.id} value={option.id} className="bg-surface-raised">
+                {option.isHistorical ? `↺ ${option.name}` : option.name}
+              </option>
+            ))}
+          </select>
           <Clock />
           <TierBadge tier={regionSummary.tier} size="md" pulse={regionSummary.tier !== 'NORMAL'} />
         </div>
@@ -84,7 +68,7 @@ export function Header() {
   );
 }
 
-/** Live wall-clock readout, as every operations board carries. */
+/** Live wall-clock readout. */
 function Clock() {
   const [now, setNow] = useState(() => new Date());
 
@@ -95,11 +79,10 @@ function Clock() {
 
   return (
     <div className="hidden text-right md:block">
-      <p className="font-display text-lg font-bold leading-none tabular-nums text-cyan-100
-        neon-text">
+      <p className="text-[13px] font-semibold leading-none tabular-nums text-white">
         {now.toLocaleTimeString('en-GB', { hour12: false })}
       </p>
-      <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-slate-500">
+      <p className="mt-0.5 text-[10px] text-slate-500">
         {now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} IST
       </p>
     </div>

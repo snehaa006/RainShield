@@ -39,6 +39,10 @@ export function FloodMap() {
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 
+    // Fill the panel with the region rather than sitting at a fixed zoom, so a
+    // wide container shows a correspondingly larger grid.
+    map.fitBounds(REGION.bounds, { padding: 32, duration: 0 });
+
     map.on('load', () => {
       map.addSource(GRID_SOURCE, { type: 'geojson', data: emptyCollection() });
       map.addSource(WARD_SOURCE, { type: 'geojson', data: wardCollection() });

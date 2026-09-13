@@ -5,19 +5,18 @@ export function ScenarioNote() {
   const { scenario, isSimulating } = useDashboard();
 
   return (
-    <div className="pointer-events-auto max-w-xs border border-surface-border bg-surface-deep/85
-      px-3 py-2 backdrop-blur-md clip-notch shadow-[0_0_24px_-10px_rgba(34,211,238,0.8)]">
-      <p className="flex flex-wrap items-center gap-2 font-display text-[13px] font-semibold
-        uppercase tracking-[0.12em] text-cyan-100">
+    <div className="pointer-events-auto max-w-xs rounded-[12px] border border-surface-border
+      bg-black/70 px-3 py-2 backdrop-blur-xl">
+      <p className="flex flex-wrap items-center gap-2 text-[12px] font-semibold text-white">
         {scenario.isHistorical && (
-          <span className="border border-violet-400/40 bg-violet-500/15 px-1.5 py-px font-mono
-            text-[9px] uppercase tracking-[0.18em] text-violet-300">
+          <span className="rounded-full bg-violet-500/20 px-2 py-0.5 text-[10px] font-medium
+            text-violet-300">
             Replay
           </span>
         )}
         {isSimulating && (
-          <span className="border border-hud/40 bg-hud/15 px-1.5 py-px font-mono text-[9px]
-            uppercase tracking-[0.18em] text-cyan-300">
+          <span className="rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-medium
+            text-accent">
             Simulated
           </span>
         )}
