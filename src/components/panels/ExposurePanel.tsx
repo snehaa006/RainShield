@@ -5,7 +5,7 @@ import { useDashboard } from '@/hooks/useDashboard';
 import { Panel } from '@/components/ui/Panel';
 
 /** Critical assets sitting in cells the inundation model expects to flood. */
-export function ExposurePanel() {
+export function ExposurePanel({ className = '' }: { className?: string }) {
   const { cells } = useDashboard();
   const exposed = useMemo(() => exposedAssets(cells), [cells]);
 
@@ -13,10 +13,11 @@ export function ExposurePanel() {
     <Panel
       title="Infrastructure exposure"
       actions={<span className="text-[11px] text-slate-500">{exposed.length} assets</span>}
-      bodyClassName="min-h-0 flex-1 overflow-y-auto scroll-thin p-2"
+      bodyClassName="min-h-0 flex-1 overflow-y-auto scroll-thin px-2 pb-2"
+      className={className}
     >
       {exposed.length === 0 ? (
-        <p className="p-2 text-xs text-slate-500">
+        <p className="p-2 text-[12px] text-slate-500">
           No hospitals, schools, shelters or bridges are in cells above the 0.15 m threshold at
           this horizon.
         </p>
@@ -25,25 +26,20 @@ export function ExposurePanel() {
           {exposed.map((asset) => (
             <li
               key={asset.id}
-              className="clip-bevel flex items-center gap-3 border border-transparent px-2 py-1.5
-                transition-colors hover:border-hud/30 hover:bg-hud/5"
+              className="flex items-center gap-3 rounded-[10px] px-2 py-1.5 transition-colors
+                hover:bg-white/[0.05]"
             >
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full
-                border border-hud/30 bg-hud/10 text-xs text-cyan-200">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full
+                bg-white/[0.07] text-xs">
                 {INFRA_ICONS[asset.type]}
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-xs text-slate-200">{asset.name}</p>
-                <p className="font-mono text-[10px] uppercase tracking-[0.1em] text-slate-500">
-                  {INFRA_LABELS[asset.type]}
-                </p>
+                <p className="truncate text-[12px] text-slate-100">{asset.name}</p>
+                <p className="text-[10px] text-slate-500">{INFRA_LABELS[asset.type]}</p>
               </div>
               <span
-                className="shrink-0 font-display text-sm font-bold tabular-nums"
-                style={{
-                  color: asset.depth >= 0.6 ? '#f87171' : '#fbbf24',
-                  textShadow: `0 0 12px ${asset.depth >= 0.6 ? '#f8717180' : '#fbbf2480'}`,
-                }}
+                className="shrink-0 text-[13px] font-semibold tabular-nums"
+                style={{ color: asset.depth >= 0.6 ? '#ff453a' : '#ff9f0a' }}
               >
                 {metres(asset.depth)}
               </span>

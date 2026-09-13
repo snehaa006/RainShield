@@ -6,7 +6,7 @@ import { Panel } from '@/components/ui/Panel';
 import { TierBadge } from '@/components/ui/TierBadge';
 
 /** Alert intelligence: why this ward is alerting and how much time is left. */
-export function AlertPanel() {
+export function AlertPanel({ className = '' }: { className?: string }) {
   const { selectedWard, wardSummaries, selectWard } = useDashboard();
   const ward = selectedWard ?? wardSummaries[0];
 
@@ -15,26 +15,24 @@ export function AlertPanel() {
   return (
     <Panel
       title="Alert intelligence"
+      className={className}
       actions={
         selectedWard ? (
-          <button type="button" className="chip" onClick={() => selectWard(null)}>
-            Reset
+          <button type="button" className="btn" onClick={() => selectWard(null)}>
+            Top ward
           </button>
         ) : (
-          <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-slate-500">
-            Top ward
-          </span>
+          <span className="text-[11px] text-slate-500">Highest risk</span>
         )
       }
-      bodyClassName="space-y-4 p-4"
+      bodyClassName="space-y-4 px-4 pb-4"
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h3 className="font-display text-2xl font-bold uppercase tracking-[0.08em]
-            text-cyan-50 neon-text">
+          <h3 className="text-[22px] font-semibold leading-tight tracking-tight text-white">
             {ward.ward.name}
           </h3>
-          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-slate-500">
+          <p className="text-[11px] text-slate-500">
             {ward.floodedCellCount} of {ward.cellCount} km² cells flooding
           </p>
         </div>
@@ -52,7 +50,7 @@ export function AlertPanel() {
           label="Expected water depth"
           value={Math.min(1, ward.peakWaterDepth / 1.5)}
           display={metres(ward.peakWaterDepth)}
-          color="#22d3ee"
+          color="#0a84ff"
           hint={depthContext(ward.peakWaterDepth)}
         />
         <Meter
@@ -63,13 +61,19 @@ export function AlertPanel() {
         />
       </div>
 
-      <dl className="grid grid-cols-3 gap-3 border-t border-surface-hairline pt-3">
-        <Field label="Time to inundation" value={duration(ward.timeToInundation)}
-          hint={ward.timeToInundation !== null ? `~${clockAt(ward.timeToInundation)} IST` : 'no onset'} />
-        <Field label="Population at risk" value={compactNumber(ward.populationAtRisk)}
-          hint={fullNumber(ward.populationAtRisk)} />
+      <dl className="grid grid-cols-3 gap-2">
         <Field
-          label="Ensemble confidence"
+          label="Time to inundation"
+          value={duration(ward.timeToInundation)}
+          hint={ward.timeToInundation !== null ? `~${clockAt(ward.timeToInundation)} IST` : 'no onset'}
+        />
+        <Field
+          label="Population at risk"
+          value={compactNumber(ward.populationAtRisk)}
+          hint={fullNumber(ward.populationAtRisk)}
+        />
+        <Field
+          label="Confidence"
           value={ward.confidence}
           hint="model agreement"
           color={CONFIDENCE_COLORS[ward.confidence]}
@@ -91,18 +95,12 @@ function Field({
   color?: string;
 }) {
   return (
-    <div>
-      <dt className="stat-label">{label}</dt>
-      <dd
-        className="font-display text-base font-bold tabular-nums"
-        style={{
-          color: color ?? '#cffafe',
-          textShadow: `0 0 12px ${(color ?? '#22d3ee')}80`,
-        }}
-      >
+    <div className="tile">
+      <dt className="text-[10px] leading-tight text-slate-500">{label}</dt>
+      <dd className="mt-1 text-[14px] font-semibold tabular-nums" style={{ color: color ?? '#fff' }}>
         {value}
       </dd>
-      <dd className="font-mono text-[10px] tracking-wide text-slate-500">{hint}</dd>
+      <dd className="text-[10px] text-slate-600">{hint}</dd>
     </div>
   );
 }

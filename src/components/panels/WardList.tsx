@@ -4,8 +4,14 @@ import { useDashboard } from '@/hooks/useDashboard';
 import { Panel } from '@/components/ui/Panel';
 import { TierBadge } from '@/components/ui/TierBadge';
 
-/** Ward drill-down list, ordered by composite risk. */
-export function WardList({ className = '' }: { className?: string }) {
+interface WardListProps {
+  className?: string;
+  /** 'list' for the narrow rail, 'grid' for the full-width wards view. */
+  variant?: 'list' | 'grid';
+}
+
+/** Ward drill-down, ordered by composite risk. */
+export function WardList({ className = '', variant = 'list' }: WardListProps) {
   const { wardSummaries, selectedWardId, selectWard } = useDashboard();
   const actionable = wardSummaries.filter((w) => w.tier !== 'NORMAL').length;
 
@@ -13,14 +19,20 @@ export function WardList({ className = '' }: { className?: string }) {
     <Panel
       title="Ward risk ranking"
       actions={
-        <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-slate-500">
-          <span className="text-cyan-300">{actionable}</span>/{wardSummaries.length} act.
+        <span className="text-[11px] text-slate-500">
+          {actionable} of {wardSummaries.length} actionable
         </span>
       }
-      bodyClassName="min-h-0 flex-1 overflow-y-auto scroll-thin p-2"
+      bodyClassName="min-h-0 flex-1 overflow-y-auto scroll-thin px-2 pb-2"
       className={className}
     >
-      <ul className="space-y-1">
+      <ul
+        className={
+          variant === 'grid'
+            ? 'grid gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4'
+            : 'space-y-1'
+        }
+      >
         {wardSummaries.map((summary, index) => {
           const isSelected = summary.ward.id === selectedWardId;
           const color = TIER_COLORS[summary.tier];
@@ -29,26 +41,18 @@ export function WardList({ className = '' }: { className?: string }) {
               <button
                 type="button"
                 onClick={() => selectWard(isSelected ? null : summary.ward.id)}
-                className={`clip-bevel relative w-full border px-3 py-2.5 text-left
-                  transition-all duration-200 ${
-                    isSelected
-                      ? 'border-hud/60 bg-hud/10 shadow-[inset_0_0_20px_-10px_rgba(34,211,238,0.9)]'
-                      : 'border-transparent hover:border-hud/30 hover:bg-hud/5'
-                  }`}
+                className={`w-full rounded-[12px] border px-3 py-2.5 text-left transition-colors ${
+                  isSelected
+                    ? 'border-accent/60 bg-accent-soft'
+                    : 'border-transparent hover:border-surface-border hover:bg-white/[0.04]'
+                }`}
               >
-                {/* Tier spine so the list scans by colour at a glance. */}
-                <span
-                  className="absolute inset-y-0 left-0 w-[3px]"
-                  style={{ backgroundColor: color, boxShadow: `0 0 10px 0 ${color}` }}
-                />
-
                 <div className="flex items-center justify-between gap-2">
-                  <span className="flex items-baseline gap-2">
-                    <span className="font-mono text-[10px] tabular-nums text-hud/50">
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <span className="text-[11px] tabular-nums text-slate-600">
                       {String(index + 1).padStart(2, '0')}
                     </span>
-                    <span className="font-display text-[15px] font-semibold tracking-wide
-                      text-slate-100">
+                    <span className="truncate text-[14px] font-semibold text-white">
                       {summary.ward.name}
                     </span>
                   </span>
@@ -56,31 +60,21 @@ export function WardList({ className = '' }: { className?: string }) {
                 </div>
 
                 <div className="mt-2 flex items-center gap-2">
-                  <div
-                    className="h-1.5 flex-1 border border-surface-hairline bg-surface-deep/80"
-                    style={{
-                      backgroundImage:
-                        'repeating-linear-gradient(90deg, rgba(56,189,248,0.10) 0 3px, transparent 3px 6px)',
-                    }}
-                  >
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-white/[0.08]">
                     <div
-                      className="h-full transition-[width] duration-500"
-                      style={{
-                        width: `${summary.risk * 100}%`,
-                        background: `linear-gradient(90deg, ${color}66, ${color})`,
-                        boxShadow: `0 0 10px 0 ${color}`,
-                      }}
+                      className="h-full rounded-full transition-[width] duration-500"
+                      style={{ width: `${summary.risk * 100}%`, backgroundColor: color }}
                     />
                   </div>
                   <span
-                    className="w-9 text-right font-display text-[13px] font-bold tabular-nums"
-                    style={{ color, textShadow: `0 0 10px ${color}80` }}
+                    className="w-8 text-right text-[12px] font-semibold tabular-nums"
+                    style={{ color }}
                   >
                     {summary.risk.toFixed(2)}
                   </span>
                 </div>
 
-                <dl className="mt-2 grid grid-cols-4 gap-2 text-[11px]">
+                <dl className="mt-2 grid grid-cols-4 gap-2">
                   <Stat label="P(flood)" value={percent(summary.peakFloodProbability)} />
                   <Stat label="Depth" value={metres(summary.peakWaterDepth)} />
                   <Stat label="Onset" value={duration(summary.timeToInundation)} />
@@ -98,8 +92,8 @@ export function WardList({ className = '' }: { className?: string }) {
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="font-mono text-[9px] uppercase tracking-[0.12em] text-slate-600">{label}</dt>
-      <dd className="font-mono tabular-nums text-slate-300">{value}</dd>
+      <dt className="text-[10px] text-slate-600">{label}</dt>
+      <dd className="text-[11px] tabular-nums text-slate-300">{value}</dd>
     </div>
   );
 }

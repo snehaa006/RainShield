@@ -10,199 +10,113 @@
   }
 
   body {
-    @apply bg-surface font-sans text-slate-300 antialiased;
-    background-image:
-      /* Two corner light wells give the flat navy some depth. */
-      radial-gradient(1200px 600px at 12% -10%, rgba(14, 116, 144, 0.28), transparent 60%),
-      radial-gradient(900px 500px at 100% 0%, rgba(37, 99, 235, 0.18), transparent 55%),
-      linear-gradient(180deg, #061020 0%, #040a14 45%, #02060d 100%);
-    background-attachment: fixed;
-  }
-
-  /* Faint engineering grid over the whole shell, like the reference boards. */
-  body::before {
-    content: '';
-    position: fixed;
-    inset: 0;
-    pointer-events: none;
-    z-index: 0;
-    background-image:
-      linear-gradient(rgba(56, 189, 248, 0.055) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(56, 189, 248, 0.055) 1px, transparent 1px);
-    background-size: 44px 44px;
-    mask-image: radial-gradient(ellipse 120% 90% at 50% 35%, #000 40%, transparent 100%);
-  }
-
-  #root {
-    position: relative;
-    z-index: 1;
+    @apply bg-surface font-sans text-slate-200 antialiased;
   }
 
   ::selection {
-    background: rgba(34, 211, 238, 0.3);
-    color: #ecfeff;
+    background: rgba(10, 132, 255, 0.35);
   }
 }
 
 @layer components {
-  /* ---------------------------------------------------------------- panels */
+  /* ------------------------------------------------------------------ cards */
 
   .panel {
-    @apply relative border border-surface-border bg-surface-raised shadow-hud backdrop-blur-md;
-    /* Notched top-right corner — the signature shape of the reference decks. */
-    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
-    background-image: linear-gradient(
-      160deg,
-      rgba(34, 211, 238, 0.07) 0%,
-      rgba(8, 20, 36, 0) 38%
-    );
-  }
-
-  /* Hairline of light along the top edge of every panel. */
-  .panel::before {
-    content: '';
-    @apply pointer-events-none absolute inset-x-0 top-0 h-px;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      rgba(103, 232, 249, 0.55) 22%,
-      rgba(103, 232, 249, 0.18) 60%,
-      transparent
-    );
+    @apply rounded-card border border-surface-border bg-surface-raised shadow-card;
   }
 
   .panel-header {
-    @apply relative flex items-center justify-between gap-3 px-4 py-2.5;
-    background: linear-gradient(90deg, rgba(34, 211, 238, 0.12), rgba(8, 20, 36, 0) 65%);
-    border-bottom: 1px solid theme('colors.surface.hairline');
+    @apply flex items-center justify-between gap-3 px-4 pb-2 pt-3;
   }
 
   .panel-title {
-    @apply whitespace-nowrap font-display text-[12px] font-semibold uppercase tracking-[0.09em]
-      text-cyan-100/90;
-    text-shadow: 0 0 12px rgba(34, 211, 238, 0.45);
+    @apply text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400;
   }
 
-  /* Angled tick that sits to the left of every panel title. */
-  .panel-tick {
-    @apply mr-2 inline-block h-3.5 w-1 shrink-0 bg-hud;
-    box-shadow: 0 0 10px rgba(34, 211, 238, 0.9);
-    clip-path: polygon(0 0, 100% 0, 100% 78%, 50% 100%, 0 78%);
+  /* Nested tile inside a card — one step lighter than the card itself. */
+  .tile {
+    @apply rounded-[10px] border border-surface-hairline bg-white/[0.02] px-3 py-2.5;
   }
 
-  /* Four L-shaped brackets that frame a panel or the map. */
-  .hud-corner {
-    @apply pointer-events-none absolute h-3 w-3 border-hud/70;
+  /* ------------------------------------------------------------- iOS controls */
+
+  /* Segmented control: a soft track with a lifted active pill. */
+  .segmented {
+    @apply inline-flex items-center gap-0.5 rounded-[10px] bg-white/[0.06] p-0.5;
   }
 
-  .hud-frame {
-    @apply relative border border-surface-border bg-surface-raised/60 backdrop-blur-md;
-    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+  .segmented-item {
+    @apply rounded-lg px-2.5 py-1 text-[11px] font-medium text-slate-400 transition-colors
+      hover:text-slate-200;
   }
 
-  /* ------------------------------------------------------------- controls */
+  .segmented-item-active {
+    @apply bg-white/[0.12] text-white shadow-control;
+  }
 
+  /* Standalone pill button. */
+  .btn {
+    @apply rounded-full border border-surface-border bg-white/[0.04] px-3 py-1 text-[11px]
+      font-medium text-slate-300 transition-colors hover:bg-white/[0.09] hover:text-white
+      disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white/[0.04];
+  }
+
+  .btn-accent {
+    @apply border-transparent bg-accent text-white hover:bg-accent/90;
+  }
+
+  /* Kept for panels that still use the older chip name. */
   .chip {
-    @apply border border-surface-border bg-surface-solid/60 px-2.5 py-1 font-display text-[12px]
-      font-semibold uppercase tracking-wider text-slate-400 transition-all duration-200
-      hover:border-hud/60 hover:text-cyan-200;
-    clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px);
-  }
-
-  .chip:hover {
-    box-shadow: 0 0 14px -3px rgba(34, 211, 238, 0.6);
+    @apply btn;
   }
 
   .chip-active {
-    @apply border-hud/70 bg-hud/15 text-cyan-200;
-    box-shadow: 0 0 16px -2px rgba(34, 211, 238, 0.65), inset 0 0 12px -6px rgba(34, 211, 238, 0.9);
+    @apply border-transparent bg-white/[0.14] text-white;
   }
 
-  /* ---------------------------------------------------------------- stats */
+  /* ---------------------------------------------------------------- readouts */
 
   .stat-label {
-    @apply text-[10px] font-medium uppercase tracking-[0.16em] text-slate-500;
+    @apply text-[11px] font-medium text-slate-500;
   }
 
   .stat-value {
-    @apply font-display text-2xl font-bold leading-none tabular-nums text-cyan-50;
-    text-shadow: 0 0 16px rgba(34, 211, 238, 0.5);
-  }
-
-  .neon-text {
-    text-shadow: 0 0 14px currentColor;
-  }
-
-  /* Thin holographic rule used between header blocks. */
-  .hud-rule {
-    @apply h-px w-full;
-    background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.45), transparent);
-  }
-
-  /* Slow light sweep for the map canvas. */
-  .hud-scan {
-    @apply pointer-events-none absolute inset-x-0 top-0 h-24;
-    background: linear-gradient(
-      180deg,
-      transparent,
-      rgba(34, 211, 238, 0.10) 45%,
-      rgba(34, 211, 238, 0.16) 52%,
-      transparent
-    );
+    @apply text-2xl font-semibold tabular-nums tracking-tight text-white;
   }
 
   .scroll-thin {
     scrollbar-width: thin;
-    scrollbar-color: rgba(34, 211, 238, 0.35) transparent;
+    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
   }
 
   .scroll-thin::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 7px;
+    height: 7px;
   }
 
   .scroll-thin::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, rgba(34, 211, 238, 0.55), rgba(14, 116, 144, 0.5));
-  }
-}
-
-@layer utilities {
-  /* Diagonal corner cut, used on the header plate and KPI tiles. */
-  .clip-notch {
-    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
-  }
-
-  .clip-plate {
-    clip-path: polygon(18px 0, calc(100% - 18px) 0, 100% 100%, 0 100%);
-  }
-
-  .clip-bevel {
-    clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+    @apply rounded-full bg-white/15;
   }
 }
 
 /* ---------------------------------------------------- MapLibre chrome ---- */
 
-/* Cool the basemap towards the cyan cast the reference boards use. */
-.maplibregl-canvas {
-  filter: saturate(1.15) contrast(1.08) hue-rotate(-12deg) brightness(0.92);
-}
-
 .maplibregl-ctrl-group {
-  @apply border border-surface-border bg-surface-solid/80 backdrop-blur;
-  box-shadow: 0 0 18px -6px rgba(34, 211, 238, 0.6) !important;
+  @apply overflow-hidden rounded-[10px] border border-surface-border bg-surface-raised/90
+    backdrop-blur;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.6) !important;
 }
 
 .maplibregl-ctrl-group button + button {
-  border-top: 1px solid theme('colors.surface.hairline');
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
-  filter: invert(88%) sepia(20%) saturate(900%) hue-rotate(150deg);
+  filter: invert(80%);
 }
 
 .maplibregl-ctrl-attrib {
-  @apply bg-surface-deep/70 text-[10px] text-slate-500;
+  @apply bg-black/70 text-[10px] text-slate-500;
 }
 
 .maplibregl-ctrl-attrib a {

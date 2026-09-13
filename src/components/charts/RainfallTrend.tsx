@@ -14,7 +14,7 @@ import { Panel } from '@/components/ui/Panel';
 import type { LeadTime } from '@/types';
 
 /** Region-mean rainfall and flood probability across the forecast horizon. */
-export function RainfallTrend() {
+export function RainfallTrend({ className = '' }: { className?: string }) {
   const { regionSeries, lead, setLead } = useDashboard();
 
   const data = regionSeries.map((point) => ({
@@ -24,8 +24,12 @@ export function RainfallTrend() {
   }));
 
   return (
-    <Panel title="Nowcast trend" code="TRD-01" bodyClassName="p-2 pr-4 pt-4">
-      <ResponsiveContainer width="100%" height={180}>
+    <Panel
+      title="Nowcast trend"
+      className={className}
+      bodyClassName="min-h-0 flex-1 px-2 pb-2"
+    >
+      <ResponsiveContainer width="100%" height="100%" minHeight={150}>
         <ComposedChart
           data={data}
           margin={{ top: 4, right: 8, bottom: 0, left: -12 }}
@@ -36,43 +40,34 @@ export function RainfallTrend() {
         >
           <defs>
             <linearGradient id="rainfallFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#22d3ee" stopOpacity={0.55} />
-              <stop offset="100%" stopColor="#22d3ee" stopOpacity={0.02} />
+              <stop offset="0%" stopColor="#0a84ff" stopOpacity={0.35} />
+              <stop offset="100%" stopColor="#0a84ff" stopOpacity={0} />
             </linearGradient>
-            {/* Soft bloom so the traces read as emissive, like the reference boards. */}
-            <filter id="traceGlow" x="-30%" y="-60%" width="160%" height="240%">
-              <feGaussianBlur stdDeviation="3.2" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
           </defs>
-          <CartesianGrid stroke="rgba(56, 189, 248, 0.10)" vertical={false} />
+          <CartesianGrid stroke="rgba(255, 255, 255, 0.07)" vertical={false} />
           <XAxis
             dataKey="label"
-            tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' }}
-            axisLine={{ stroke: 'rgba(56, 189, 248, 0.25)' }}
+            tick={{ fill: '#64748b', fontSize: 10 }}
+            axisLine={{ stroke: 'rgba(255, 255, 255, 0.10)' }}
             tickLine={false}
           />
           <YAxis
             yAxisId="rain"
-            tick={{ fill: '#64748b', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' }}
+            tick={{ fill: '#64748b', fontSize: 10 }}
             axisLine={false}
             tickLine={false}
             width={44}
           />
           <YAxis yAxisId="prob" orientation="right" hide domain={[0, 100]} />
           <Tooltip
-            cursor={{ stroke: 'rgba(34, 211, 238, 0.45)', strokeWidth: 1 }}
+            cursor={{ stroke: 'rgba(255, 255, 255, 0.25)', strokeWidth: 1 }}
             contentStyle={{
-              background: 'rgba(4, 12, 22, 0.94)',
-              border: '1px solid rgba(34, 211, 238, 0.35)',
-              borderRadius: 0,
-              boxShadow: '0 0 22px -8px rgba(34, 211, 238, 0.9)',
+              background: 'rgba(17, 19, 22, 0.96)',
+              border: '1px solid rgba(255, 255, 255, 0.10)',
+              borderRadius: 12,
               fontSize: 12,
             }}
-            labelStyle={{ color: '#67e8f9', letterSpacing: '0.08em', textTransform: 'uppercase' }}
+            labelStyle={{ color: '#94a3b8' }}
             formatter={(value: number, name: string) =>
               name.includes('probability') ? [`${value}%`, name] : [`${value} mm/hr`, name]
             }
@@ -82,10 +77,9 @@ export function RainfallTrend() {
             type="monotone"
             dataKey="peakRainfall"
             name="Peak rainfall"
-            stroke="#22d3ee"
+            stroke="#0a84ff"
             strokeWidth={2}
             fill="url(#rainfallFill)"
-            filter="url(#traceGlow)"
           />
           <Line
             yAxisId="rain"
@@ -102,20 +96,19 @@ export function RainfallTrend() {
             type="monotone"
             dataKey="floodPercent"
             name="Peak flood probability"
-            stroke="#f97316"
+            stroke="#ff9f0a"
             strokeWidth={2}
-            dot={{ r: 2.5, fill: '#f97316' }}
-            filter="url(#traceGlow)"
+            dot={{ r: 2.5, fill: '#ff9f0a' }}
           />
         </ComposedChart>
       </ResponsiveContainer>
 
-      <div className="flex items-center justify-between px-3 pb-1 font-mono text-[10px]
-        uppercase tracking-[0.12em] text-slate-500">
-        <Legend color="#22d3ee" label="Peak rainfall" />
+      <div className="flex flex-wrap items-center justify-between gap-2 px-3 pb-1 text-[10px]
+        text-slate-500">
+        <Legend color="#0a84ff" label="Peak rainfall" />
         <Legend color="#64748b" label="Mean rainfall" />
-        <Legend color="#f97316" label="Peak flood prob." />
-        <span className="text-hud/50">click to scrub · {LEAD_TIME_LABELS[lead]}</span>
+        <Legend color="#ff9f0a" label="Peak flood probability" />
+        <span className="text-slate-600">click to scrub · {LEAD_TIME_LABELS[lead]}</span>
       </div>
     </Panel>
   );
@@ -124,10 +117,7 @@ export function RainfallTrend() {
 function Legend({ color, label }: { color: string; label: string }) {
   return (
     <span className="flex items-center gap-1.5">
-      <span
-        className="h-1.5 w-3"
-        style={{ backgroundColor: color, boxShadow: `0 0 8px 0 ${color}` }}
-      />
+      <span className="h-1.5 w-3 rounded-full" style={{ backgroundColor: color }} />
       {label}
     </span>
   );

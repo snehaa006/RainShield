@@ -15,13 +15,13 @@ const LAND_USE_LABELS: Record<string, string> = {
 };
 
 /** Per-cell drill-down: the model inputs and the risk terms they produced. */
-export function CellInspector() {
+export function CellInspector({ className = '' }: { className?: string }) {
   const { selectedCell, selectCell } = useDashboard();
 
   if (!selectedCell) {
     return (
-      <Panel title="Cell inspector" code="CEL-01" bodyClassName="p-4">
-        <p className="text-xs leading-relaxed text-slate-500">
+      <Panel title="Cell inspector" className={className}>
+        <p className="text-[12px] leading-relaxed text-slate-500">
           Select a 1 km cell on the map to inspect its model inputs, flood forecast and the
           weighted terms behind its risk score.
         </p>
@@ -34,18 +34,18 @@ export function CellInspector() {
   return (
     <Panel
       title="Cell inspector"
-      code="CEL-01"
+      className={className}
       actions={
-        <button type="button" className="chip" onClick={() => selectCell(null)}>
+        <button type="button" className="btn" onClick={() => selectCell(null)}>
           Clear
         </button>
       }
-      bodyClassName="min-h-0 flex-1 space-y-4 overflow-y-auto scroll-thin p-4"
+      bodyClassName="min-h-0 flex-1 space-y-4 overflow-y-auto scroll-thin px-4 pb-4"
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="font-mono text-sm tracking-wider text-cyan-100">{selectedCell.id}</p>
-          <p className="text-xs text-slate-500">
+          <p className="text-[13px] font-semibold text-white">{selectedCell.id}</p>
+          <p className="text-[11px] text-slate-500">
             {ward?.name} · {selectedCell.lat.toFixed(3)}°N {selectedCell.lon.toFixed(3)}°E
           </p>
         </div>
@@ -66,7 +66,7 @@ export function CellInspector() {
       </dl>
 
       <div className="border-t border-surface-hairline pt-3">
-        <p className="stat-label mb-2">Static layers</p>
+        <p className="mb-2 text-[11px] font-medium text-slate-400">Static layers</p>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
           <Row label="Elevation" value={`${selectedCell.elevation.toFixed(1)} m`} />
           <Row label="Slope" value={`${selectedCell.slope.toFixed(1)}°`} />
@@ -79,8 +79,8 @@ export function CellInspector() {
 
       <div className="border-t border-surface-hairline pt-3">
         <div className="mb-2 flex items-baseline justify-between">
-          <p className="stat-label">Risk contribution</p>
-          <p className="font-display text-base font-bold tabular-nums text-cyan-50">
+          <p className="text-[11px] font-medium text-slate-400">Risk contribution</p>
+          <p className="text-[15px] font-semibold tabular-nums text-white">
             {selectedCell.risk.total.toFixed(3)}
           </p>
         </div>
@@ -94,7 +94,7 @@ function Row({ label, value, color }: { label: string; value: string; color?: st
   return (
     <div className="flex items-baseline justify-between gap-2">
       <dt className="text-slate-500">{label}</dt>
-      <dd className="tabular-nums" style={{ color: color ?? '#cbd5e1' }}>
+      <dd className="tabular-nums" style={{ color: color ?? '#e2e8f0' }}>
         {value}
       </dd>
     </div>

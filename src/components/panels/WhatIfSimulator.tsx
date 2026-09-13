@@ -11,7 +11,7 @@ import { Slider } from '@/components/ui/Slider';
  * Inject a hypothetical rainfall / drainage scenario and see the impact delta
  * against the unmodified forecast for the same horizon.
  */
-export function WhatIfSimulator() {
+export function WhatIfSimulator({ className = '' }: { className?: string }) {
   const { scenario, lead, whatIf, setWhatIf, resetWhatIf, regionSummary, isSimulating } =
     useDashboard();
 
@@ -23,17 +23,18 @@ export function WhatIfSimulator() {
   return (
     <Panel
       title="What-if simulator"
+      className={className}
       actions={
         <button
           type="button"
-          className="chip"
+          className="btn"
           onClick={resetWhatIf}
           disabled={!isSimulating}
         >
           Reset
         </button>
       }
-      bodyClassName="space-y-4 p-4"
+      bodyClassName="space-y-4 px-4 pb-4"
     >
       <Slider
         label="Additional rainfall"
@@ -66,7 +67,7 @@ export function WhatIfSimulator() {
         hint="Fraction of design capacity — drops when inlets choke"
       />
 
-      <div className="grid grid-cols-3 gap-2 border-t border-surface-hairline pt-3">
+      <div className="grid grid-cols-3 gap-2">
         <Delta
           label="Population at risk"
           base={baseline.populationAtRisk}
@@ -102,15 +103,13 @@ function Delta({
   format: (value: number) => string;
 }) {
   const change = next - base;
-  const tone = change > 0 ? 'text-rose-400' : change < 0 ? 'text-emerald-400' : 'text-slate-500';
+  const tone = change > 0 ? 'text-tier-critical' : change < 0 ? 'text-tier-normal' : 'text-slate-600';
 
   return (
-    <div>
-      <p className="stat-label">{label}</p>
-      <p className="font-display text-base font-bold tabular-nums text-cyan-50 neon-text">
-        {format(next)}
-      </p>
-      <p className={`font-mono text-[10px] tabular-nums ${tone}`}>
+    <div className="tile">
+      <p className="text-[10px] leading-tight text-slate-500">{label}</p>
+      <p className="mt-1 text-[14px] font-semibold tabular-nums text-white">{format(next)}</p>
+      <p className={`text-[10px] tabular-nums ${tone}`}>
         {change === 0 ? 'no change' : `${change > 0 ? '+' : '−'}${format(Math.abs(change))}`}
       </p>
     </div>
