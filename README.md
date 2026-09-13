@@ -15,9 +15,29 @@ npm run dev      # http://localhost:5173
 npm run build    # typecheck + production bundle
 ```
 
-The basemap loads raster tiles from CARTO, so the map needs outbound network access.
-Without it the grid, wards and overlays still render over a flat background — all model
-data is generated locally.
+### Basemap key
+
+The basemap loads raster tiles from CARTO, which has required an API key since
+August 2026 — without one the tiles carry an "API KEY REQUIRED" watermark. Keys are
+free up to 5M tile requests/month: <https://carto.com/basemaps/apikey>.
+
+```bash
+cp .env.example .env.local     # then fill in VITE_BASEMAP_KEY
+```
+
+Two things to watch:
+
+- **Vite inlines `VITE_*` values at build time.** Setting the variable on a hosting
+  platform does nothing to an *existing* deployment — you have to redeploy so the key
+  is baked into a fresh bundle. On Vercel: add it under Settings → Environment
+  Variables for the right environment(s), then Redeploy with the build cache off.
+- **CARTO's style paths are not uniform.** The voyager styles are nested under
+  `rastertiles/`; the light and dark ones sit at the root. `rastertiles/dark_all`
+  looks plausible but is not a valid style path. See `STYLE` in
+  `src/components/map/mapStyle.ts`.
+
+The map needs outbound network access for tiles. Without it the grid, wards and
+overlays still render over a flat background — all model data is generated locally.
 
 ## What the dashboard does
 
