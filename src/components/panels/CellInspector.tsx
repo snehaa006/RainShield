@@ -20,7 +20,7 @@ export function CellInspector() {
 
   if (!selectedCell) {
     return (
-      <Panel title="Grid cell inspector" bodyClassName="p-4">
+      <Panel title="Cell inspector" code="CEL-01" bodyClassName="p-4">
         <p className="text-xs leading-relaxed text-slate-500">
           Select a 1 km cell on the map to inspect its model inputs, flood forecast and the
           weighted terms behind its risk score.
@@ -33,7 +33,8 @@ export function CellInspector() {
 
   return (
     <Panel
-      title="Grid cell inspector"
+      title="Cell inspector"
+      code="CEL-01"
       actions={
         <button type="button" className="chip" onClick={() => selectCell(null)}>
           Clear
@@ -43,7 +44,7 @@ export function CellInspector() {
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="font-mono text-sm text-slate-100">{selectedCell.id}</p>
+          <p className="font-mono text-sm tracking-wider text-cyan-100">{selectedCell.id}</p>
           <p className="text-xs text-slate-500">
             {ward?.name} · {selectedCell.lat.toFixed(3)}°N {selectedCell.lon.toFixed(3)}°E
           </p>
@@ -64,7 +65,7 @@ export function CellInspector() {
         />
       </dl>
 
-      <div className="border-t border-surface-border pt-3">
+      <div className="border-t border-surface-hairline pt-3">
         <p className="stat-label mb-2">Static layers</p>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
           <Row label="Elevation" value={`${selectedCell.elevation.toFixed(1)} m`} />
@@ -76,10 +77,10 @@ export function CellInspector() {
         </dl>
       </div>
 
-      <div className="border-t border-surface-border pt-3">
+      <div className="border-t border-surface-hairline pt-3">
         <div className="mb-2 flex items-baseline justify-between">
           <p className="stat-label">Risk contribution</p>
-          <p className="text-sm font-semibold tabular-nums text-slate-100">
+          <p className="font-display text-base font-bold tabular-nums text-cyan-50">
             {selectedCell.risk.total.toFixed(3)}
           </p>
         </div>
