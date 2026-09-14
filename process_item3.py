@@ -1,39 +1,51 @@
 import os
-import numpy as np
 import rasterio
+from rasterio.enums import Resampling
+from rasterio.warp import reproject
 
 MASTER_DEM_PATH = "./processed_data/dem_1km_master.tif"
+REAL_POP_INPUT = "./raw_data_feeds/real_india_pop.tif"
 OUTPUT_POP_RASTER = "./processed_data/population_1km.tif"
-OUTPUT_LULC_RASTER = "./processed_data/lulc_impervious_1km.tif"
 
-def process_population_and_lulc():
-    print("[+] Processing Population Density & Land Cover (LULC) layers...")
+def process_real_worldpop_data():
+    print(f"[+] Reading 100% REAL WorldPop raster: {REAL_POP_INPUT}")
+    
+    if not os.path.exists(REAL_POP_INPUT):
+        raise FileNotFoundError(f"[!] Please download real_india_pop.tif into ./raw_data_feeds/")
 
-    # Load master DEM matrix for shape matching and spatial bounds
+    # 1. Open Master DEM to extract transform matrix and dimensions
     with rasterio.open(MASTER_DEM_PATH) as master_src:
+        target_crs = master_src.crs
+        target_transform = master_src.transform
         width = master_src.width
         height = master_src.height
         meta = master_src.meta.copy()
 
-    # 1. Generate Population Density Matrix (People per 1km cell)
-    # Using seed for reproducible spatial distribution across Mumbai grid
-    np.random.seed(101)
-    pop_grid = np.random.gamma(shape=2.0, scale=1200.0, size=(height, width)).astype(np.float32)
+    # 2. Open Real WorldPop file and reproject/resample to match master 1km grid shape
+    with rasterio.open(REAL_POP_INPUT) as pop_src:
+        real_pop_grid = np.zeros((height, width), dtype=np.float32)
 
-    # 2. Generate LULC Imperviousness Fraction (0.0 = permeable soil, 1.0 = paved urban surface)
-    # High urban impermeability reduces rainwater infiltration rate
-    lulc_grid = np.random.beta(a=5.0, b=2.0, size=(height, width)).astype(np.float32)
+        reproject(
+            source=rasterio.band(pop_src, 1),
+            destination=real_pop_grid,
+            src_transform=pop_src.transform,
+            src_crs=pop_src.crs,
+            dst_transform=target_transform,
+            dst_crs=target_crs,
+            resampling=Resampling.bilinear
+        )
 
-    # Save Population Raster
+    # Replace negative nodata values with 0
+    real_pop_grid = np.clip(real_pop_grid, 0, None)
+
+    # Save 100% Real Population Density Grid
     meta.update({'dtype': 'float32', 'count': 1})
     with rasterio.open(OUTPUT_POP_RASTER, 'w', **meta) as dst:
-        dst.write(pop_grid, 1)
-    print(f"[✓] Master 1km Population Density generated: {OUTPUT_POP_RASTER}")
+        dst.write(real_pop_grid, 1)
 
-    # Save LULC Imperviousness Raster
-    with rasterio.open(OUTPUT_LULC_RASTER, 'w', **meta) as dst:
-        dst.write(lulc_grid, 1)
-    print(f"[✓] Master 1km LULC Imperviousness generated: {OUTPUT_LULC_RASTER}")
+    print(f"[✓] 100% Real Master 1km Population Density generated: {OUTPUT_POP_RASTER}")
+    print(f"    -> Total real estimated population in master grid: {int(real_pop_grid.sum()):,} people")
 
 if __name__ == "__main__":
-    process_population_and_lulc()
+    import numpy as np
+    process_real_worldpop_data()
