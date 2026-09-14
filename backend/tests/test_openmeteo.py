@@ -199,3 +199,20 @@ def test_error_carries_the_upstream_reason(monkeypatch):
     )
     with pytest.raises(OpenMeteoError, match="Daily API request limit exceeded"):
         OpenMeteoProvider(mesh_size=MESH).fetch()
+
+
+def test_rate_limit_is_not_retried_across_tiers(monkeypatch):
+    """A 429 applies to the endpoint; retrying narrower only adds load."""
+    from rainshield.ingest.openmeteo import OpenMeteoError
+
+    calls = []
+
+    def handler(fields):
+        calls.append(fields)
+        return _FakeResponse(429, {"error": True, "reason": "Daily API request limit exceeded"})
+
+    _patch_requests(monkeypatch, handler)
+    with pytest.raises(OpenMeteoError):
+        OpenMeteoProvider(mesh_size=MESH).fetch()
+
+    assert len(calls) == 1, f"expected a single request, got {len(calls)}"
