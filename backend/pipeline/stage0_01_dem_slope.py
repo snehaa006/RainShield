@@ -3,12 +3,12 @@ import numpy as np
 import rasterio
 from rasterio.enums import Resampling
 from rasterio.warp import calculate_default_transform, reproject
+from _paths import PROCESSED_DIR, RAW_DIR
 
-INPUT_DEM = "./raw_data_feeds/dem_30m.tif"
-OUTPUT_1KM_DEM = "./processed_data/dem_1km_master.tif"
-OUTPUT_1KM_SLOPE = "./processed_data/slope_1km_master.tif"
+INPUT_DEM = str(RAW_DIR / "dem_30m.tif")
+OUTPUT_1KM_DEM = str(PROCESSED_DIR / "dem_1km_master.tif")
+OUTPUT_1KM_SLOPE = str(PROCESSED_DIR / "slope_1km_master.tif")
 
-os.makedirs("./processed_data", exist_ok=True)
 
 def process_elevation_and_slope(input_path, dem_out_path, slope_out_path):
     target_crs = "EPSG:4326"

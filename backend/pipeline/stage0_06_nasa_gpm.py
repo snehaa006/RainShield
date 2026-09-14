@@ -3,9 +3,10 @@ import requests
 import numpy as np
 import rasterio
 from scipy.interpolate import RectBivariateSpline
+from _paths import PROCESSED_DIR, RAW_DIR
 
-MASTER_DEM_PATH = "./processed_data/dem_1km_master.tif"
-OUTPUT_GPM_RASTER = "./processed_data/nasa_gpm_rain_1km.tif"
+MASTER_DEM_PATH = str(PROCESSED_DIR / "dem_1km_master.tif")
+OUTPUT_GPM_RASTER = str(PROCESSED_DIR / "nasa_gpm_rain_1km.tif")
 
 # Mumbai Bounding Box
 MIN_LAT, MAX_LAT = 18.85, 19.25
@@ -54,7 +55,12 @@ def fetch_authentic_nasa_gpm_satellite():
         
         # Interpolate 5x5 satellite grid onto master 1km raster shape
         spline = RectBivariateSpline(sample_lats, sample_lons, precip_matrix)
-        gpm_grid = spline(np.linspace(MIN_LAT, MAX_LAT, height), np.linspace(MIN_LON, MAX_LON, width)).astype(np.float32)
+        # The spline is evaluated over ASCENDING latitudes, but the master
+        # raster is north-up (row 0 = MAX_LAT), so the result is flipped
+        # before writing. Without this the layer is upside down relative
+        # to the DEM it is stacked with.
+        gpm_south_up = spline(np.linspace(MIN_LAT, MAX_LAT, height), np.linspace(MIN_LON, MAX_LON, width))
+        gpm_grid = np.flipud(gpm_south_up).astype(np.float32)
         gpm_grid = np.clip(gpm_grid, 0, None)
         
     else:

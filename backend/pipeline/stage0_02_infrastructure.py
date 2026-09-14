@@ -2,10 +2,11 @@ import os
 import geopandas as gpd
 import numpy as np
 import rasterio
+from _paths import PROCESSED_DIR, RAW_DIR
 
-MASTER_DEM_PATH = "./processed_data/dem_1km_master.tif"
-GEOJSON_PATH = "./raw_data_feeds/real_mumbai_osm.geojson"
-OUTPUT_INFRA_RASTER = "./processed_data/infra_density_1km.tif"
+MASTER_DEM_PATH = str(PROCESSED_DIR / "dem_1km_master.tif")
+GEOJSON_PATH = str(RAW_DIR / "real_mumbai_osm.geojson")
+OUTPUT_INFRA_RASTER = str(PROCESSED_DIR / "infra_density_1km.tif")
 
 def process_downloaded_osm_geojson():
     print(f"[+] Reading 100% REAL OpenStreetMap file: {GEOJSON_PATH}")

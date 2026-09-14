@@ -2,13 +2,14 @@ import os
 import numpy as np
 import rasterio
 import matplotlib.pyplot as plt
+from _paths import PROCESSED_DIR, RAW_DIR
 
 # File Paths
-DEM_PATH = "./processed_data/dem_1km_master.tif"
-RADAR_PATH = "./processed_data/imd_dwr_reflectivity_1km.tif"
-GROUND_TRUTH_PATH = "./processed_data/nrsc_flood_ground_truth_1km.tif"
-PRED_RISK_PATH = "./processed_data/cnn_transformer_flood_risk_map.tif"
-OUTPUT_PLOT_PATH = "./processed_data/rainshield_stage3_dashboard.png"
+DEM_PATH = str(PROCESSED_DIR / "dem_1km_master.tif")
+RADAR_PATH = str(PROCESSED_DIR / "imd_dwr_reflectivity_1km.tif")
+GROUND_TRUTH_PATH = str(PROCESSED_DIR / "nrsc_flood_ground_truth_1km.tif")
+PRED_RISK_PATH = str(PROCESSED_DIR / "cnn_transformer_flood_risk_map.tif")
+OUTPUT_PLOT_PATH = str(PROCESSED_DIR / "rainshield_stage3_dashboard.png")
 
 def plot_rainshield_dashboard():
     print("[+] Generating Stage 3 Visual Inspection Dashboard...")

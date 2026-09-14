@@ -5,48 +5,75 @@ import torch.nn as nn
 import torch.optim as optim
 import rasterio
 from sklearn.metrics import roc_auc_score, classification_report
+from _paths import PROCESSED_DIR, RAW_DIR
 
-TENSOR_PATH = "./processed_data/rainshield_stage1_tensor.npz"
-MASTER_DEM_PATH = "./processed_data/dem_1km_master.tif"
-OUTPUT_PRED_RASTER = "./processed_data/cnn_transformer_flood_risk_map.tif"
+TENSOR_PATH = str(PROCESSED_DIR / "rainshield_stage1_tensor.npz")
+MASTER_DEM_PATH = str(PROCESSED_DIR / "dem_1km_master.tif")
+OUTPUT_PRED_RASTER = str(PROCESSED_DIR / "cnn_transformer_flood_risk_map.tif")
+OUTPUT_WEIGHTS = str(PROCESSED_DIR / "rainshield_cnn_transformer.pth")
 
 # PyTorch Device Configuration
 device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
 
 class RainShieldNet(nn.Module):
-    def __init__(self, in_channels=10):
+    """CNN + squeeze-excitation + spatial-transformer flood susceptibility net.
+
+    This is the architecture the shipped weights
+    (processed_data/rainshield_cnn_transformer.pth) were trained with; the
+    serving copy lives in rainshield/models/network.py and the two must stay
+    in step, because the checkpoint is loaded with strict=True.
+
+    Note the network consumes the RAW tensor in physical units (metres,
+    people/km2, mm/hr, Kelvin, dBZ) — not the MinMax-scaled X_matrix. The
+    first BatchNorm absorbs the differing channel magnitudes.
+    """
+
+    def __init__(self, in_channels=10, nhead=4):
         super(RainShieldNet, self).__init__()
-        
-        # 1. Spatial Feature Extractor (2D Convolutional Layers)
-        self.conv_block = nn.Sequential(
+
+        # 1. Spatial feature extractor
+        self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(),
+        )
+        self.conv2 = nn.Sequential(
             nn.Conv2d(32, 64, kernel_size=3, padding=1),
             nn.BatchNorm2d(64),
-            nn.ReLU()
+            nn.ReLU(),
         )
-        
-        # 2. Spatial Self-Attention (Transformer Encoder Layer)
-        encoder_layer = nn.TransformerEncoderLayer(d_model=64, nhead=4, dim_feedforward=128, batch_first=True)
-        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=2)
-        
-        # 3. Dense Flood Risk Head
+
+        # 2. Squeeze-and-excitation: re-weights channels by global context
+        self.se = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(64, 16, kernel_size=1),
+            nn.ReLU(),
+            nn.Conv2d(16, 64, kernel_size=1),
+            nn.Sigmoid(),
+        )
+
+        # 3. Spatial self-attention over the flattened 45x39 cell sequence
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=64, nhead=nhead, dim_feedforward=256, batch_first=True
+        )
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=3)
+
+        # 4. Dense per-cell flood probability head
         self.output_head = nn.Sequential(
             nn.Conv2d(64, 32, kernel_size=1),
             nn.ReLU(),
             nn.Conv2d(32, 1, kernel_size=1),
-            nn.Sigmoid()
+            nn.Sigmoid(),
         )
 
     def forward(self, x):
         B, C, H, W = x.shape
-        conv_feats = self.conv_block(x)
-        conv_reshaped = conv_feats.permute(0, 2, 3, 1).reshape(B, H * W, 64)
-        trans_out = self.transformer_encoder(conv_reshaped)
-        trans_reshaped = trans_out.reshape(B, H, W, 64).permute(0, 3, 1, 2)
-        out_prob = self.output_head(trans_reshaped)
-        return out_prob
+        feats = self.conv2(self.conv1(x))
+        feats = feats * self.se(feats)
+        seq = feats.permute(0, 2, 3, 1).reshape(B, H * W, 64)
+        seq = self.transformer_encoder(seq)
+        seq = seq.reshape(B, H, W, 64).permute(0, 3, 1, 2)
+        return self.output_head(seq)
 
 def train_deep_learning_model():
     print(f"[+] Using execution device: {device}")
@@ -105,6 +132,10 @@ def train_deep_learning_model():
             print(f"    Epoch [{epoch:3d}/150] -> Train Mask BCE Loss: {masked_loss.item():.5f}")
 
     print("[✓] Model Training Complete!")
+
+    # Persist weights so the serving backend can reload this exact model.
+    torch.save(model.state_dict(), OUTPUT_WEIGHTS)
+    print(f"[✓] Weights saved: {OUTPUT_WEIGHTS}")
 
     # Honest Evaluation on 20% Unseen Spatial Holdout Cells
     model.eval()

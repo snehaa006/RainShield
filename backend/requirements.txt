@@ -1,0 +1,14 @@
+# Serving dependencies for the RainShield API.
+#
+# PyTorch is deliberately absent: rainshield/models/numpy_backend.py runs the
+# trained network with NumPy alone (verified against torch to ~1e-6 by the test
+# suite), which keeps the deployed image small and the cold start fast. Torch is
+# only needed to retrain — see requirements-dev.txt.
+#
+# Pinned to the versions the suite was verified against.
+
+fastapi==0.141.1
+uvicorn[standard]==0.53.0
+numpy==2.4.6
+scipy==1.17.1
+requests==2.33.1

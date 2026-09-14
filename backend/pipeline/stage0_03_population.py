@@ -3,10 +3,11 @@ import rasterio
 from rasterio.enums import Resampling
 from rasterio.warp import reproject
 import numpy as np
+from _paths import PROCESSED_DIR, RAW_DIR
 
-MASTER_DEM_PATH = "./processed_data/dem_1km_master.tif"
-REAL_POP_INPUT = "./raw_data_feeds/real_india_pop.tif"
-OUTPUT_POP_RASTER = "./processed_data/population_1km.tif"
+MASTER_DEM_PATH = str(PROCESSED_DIR / "dem_1km_master.tif")
+REAL_POP_INPUT = str(RAW_DIR / "real_india_pop.tif")
+OUTPUT_POP_RASTER = str(PROCESSED_DIR / "population_1km.tif")
 
 def process_real_worldpop_data():
     print(f"[+] Processing 100% REAL WorldPop 1km density raster: {REAL_POP_INPUT}")
