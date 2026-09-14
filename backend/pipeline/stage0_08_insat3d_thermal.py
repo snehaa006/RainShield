@@ -3,9 +3,10 @@ import requests
 import numpy as np
 import rasterio
 from scipy.interpolate import RectBivariateSpline
+from _paths import PROCESSED_DIR, RAW_DIR
 
-MASTER_DEM_PATH = "./processed_data/dem_1km_master.tif"
-OUTPUT_INSAT_RASTER = "./processed_data/insat3d_brightness_temp_1km.tif"
+MASTER_DEM_PATH = str(PROCESSED_DIR / "dem_1km_master.tif")
+OUTPUT_INSAT_RASTER = str(PROCESSED_DIR / "insat3d_brightness_temp_1km.tif")
 
 # Mumbai Bounding Box
 MIN_LAT, MAX_LAT = 18.85, 19.25
@@ -56,7 +57,12 @@ def fetch_authentic_satellite_thermal():
         
         # Interpolate 5x5 matrix onto master 1km raster grid
         spline = RectBivariateSpline(sample_lats, sample_lons, temp_matrix)
-        insat_grid = spline(np.linspace(MIN_LAT, MAX_LAT, height), np.linspace(MIN_LON, MAX_LON, width)).astype(np.float32)
+        # The spline is evaluated over ASCENDING latitudes, but the master
+        # raster is north-up (row 0 = MAX_LAT), so the result is flipped
+        # before writing. Without this the layer is upside down relative
+        # to the DEM it is stacked with.
+        insat_south_up = spline(np.linspace(MIN_LAT, MAX_LAT, height), np.linspace(MIN_LON, MAX_LON, width))
+        insat_grid = np.flipud(insat_south_up).astype(np.float32)
         
     else:
         raise RuntimeError(f"[!] Satellite Thermal API request failed with status code {response.status_code}")

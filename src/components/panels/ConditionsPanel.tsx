@@ -1,10 +1,11 @@
+import { FEED_LABELS } from '@/lib/config';
 import { metres, mmPerHour } from '@/lib/format';
 import { useDashboard } from '@/hooks/useDashboard';
 import { Panel } from '@/components/ui/Panel';
 
 /** Current rainfall and inundation conditions across the region. */
 export function ConditionsPanel() {
-  const { regionSummary, scenario } = useDashboard();
+  const { regionSummary, feed } = useDashboard();
 
   const items = [
     { label: 'Peak rainfall', value: mmPerHour(regionSummary.peakRainfall), icon: '☔' },
@@ -16,7 +17,11 @@ export function ConditionsPanel() {
   return (
     <Panel
       title="Conditions"
-      actions={<span className="text-[11px] text-slate-500">{scenario.name}</span>}
+      actions={
+        <span className="text-[11px] text-slate-500">
+          {feed ? (FEED_LABELS[feed.source] ?? feed.source) : '—'}
+        </span>
+      }
     >
       <div className="grid grid-cols-2 gap-2">
         {items.map((item) => (

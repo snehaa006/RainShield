@@ -1,9 +1,10 @@
 import os
 import numpy as np
 import rasterio
+from _paths import PROCESSED_DIR, RAW_DIR
 
-MASTER_DEM_PATH = "./processed_data/dem_1km_master.tif"
-OUTPUT_CWC_RASTER = "./processed_data/cwc_river_hydrology_1km.tif"
+MASTER_DEM_PATH = str(PROCESSED_DIR / "dem_1km_master.tif")
+OUTPUT_CWC_RASTER = str(PROCESSED_DIR / "cwc_river_hydrology_1km.tif")
 
 # CWC & Municipal Gauge Monitoring Stations across Mumbai Rivers
 CWC_GAUGE_STATIONS = [

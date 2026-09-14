@@ -1,19 +1,41 @@
-import type { AlertTier, Confidence, LeadTime, Scenario } from '@/types';
+import type { AlertTier, Confidence, LeadTime } from '@/types';
 
 /**
  * Demo region. The pipeline is grid-based and config-driven: pointing it at a
  * different district is a data-onboarding change, not a redesign.
  */
+/**
+ * The analysis grid, mirroring backend/rainshield/config.py. These are the
+ * exact bounds of processed_data/dem_1km_master.tif — the raster every model
+ * layer is aligned to — so cell polygons drawn here land on the same ground
+ * the network was trained on. Row 0 is the NORTHERN edge.
+ */
 export const REGION = {
   name: 'Mumbai Suburban',
   state: 'Maharashtra',
   /** [west, south, east, north] */
-  bounds: [72.79, 19.0, 72.99, 19.22] as [number, number, number, number],
-  centre: [72.89, 19.11] as [number, number],
-  /** Grid resolution in cells; each cell is roughly 1 km across. */
-  cols: 22,
-  rows: 24,
+  bounds: [72.74986, 18.8459, 73.1002, 19.25014] as [number, number, number, number],
+  centre: [72.92503, 19.04802] as [number, number],
+  /** 1755 cells of ~1 km. */
+  cols: 39,
+  rows: 45,
 };
+
+/**
+ * Base URL of the inference API. Vite inlines VITE_* at build time, so changing
+ * this on the host requires a redeploy. Render's fromService gives a bare
+ * hostname, hence the scheme fix-up; empty means same-origin (the dev proxy).
+ */
+export const API_BASE = normaliseApiBase(import.meta.env.VITE_API_BASE);
+
+function normaliseApiBase(raw: string | undefined): string {
+  const value = (raw ?? '').trim().replace(/\/$/, '');
+  if (!value) return '';
+  return /^https?:\/\//.test(value) ? value : `https://${value}`;
+}
+
+/** How often the dashboard re-pulls the forecast, ms. */
+export const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 /** Risk weights from the system architecture spec. Tunable against past events. */
 export const RISK_WEIGHTS = {
@@ -94,43 +116,14 @@ export const DATA_SOURCES = [
   { id: 'cwc', label: 'CWC River Gauges', cadence: '1 hr' },
 ];
 
-export const SCENARIOS: Scenario[] = [
-  {
-    id: 'live',
-    name: 'Live feed',
-    description: 'Current radar + satellite nowcast for the demo region.',
-    intensity: 1,
-    centre: [0.45, 0.55],
-    isHistorical: false,
-  },
-  {
-    id: 'monsoon-surge',
-    name: 'Monsoon surge',
-    description: 'Active offshore trough pushing a sustained heavy band inland.',
-    intensity: 1.3,
-    centre: [0.35, 0.6],
-    isHistorical: false,
-  },
-  {
-    id: 'jul-2005',
-    name: '26 July 2005 replay',
-    description: 'Historical extreme: 944 mm in 24 hr over the central suburbs.',
-    intensity: 2.0,
-    centre: [0.5, 0.45],
-    isHistorical: true,
-  },
-  {
-    id: 'aug-2020',
-    name: 'Aug 2020 replay',
-    description: 'Cyclonic circulation with high tide coinciding with peak rainfall.',
-    intensity: 1.6,
-    centre: [0.6, 0.35],
-    isHistorical: true,
-  },
-];
-
 export const DEFAULT_WHAT_IF = {
   extraRainfall: 0,
   soilSaturation: 1,
   drainageCapacity: 1,
+};
+
+/** Feed labels for the ingestion health strip, keyed to the live provider. */
+export const FEED_LABELS: Record<string, string> = {
+  openmeteo: 'Open-Meteo live feed',
+  synthetic: 'Synthetic demo field',
 };

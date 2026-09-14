@@ -3,9 +3,10 @@ import requests
 import numpy as np
 import rasterio
 from scipy.interpolate import RectBivariateSpline
+from _paths import PROCESSED_DIR, RAW_DIR
 
-MASTER_DEM_PATH = "./processed_data/dem_1km_master.tif"
-OUTPUT_DWR_RASTER = "./processed_data/imd_dwr_reflectivity_1km.tif"
+MASTER_DEM_PATH = str(PROCESSED_DIR / "dem_1km_master.tif")
+OUTPUT_DWR_RASTER = str(PROCESSED_DIR / "imd_dwr_reflectivity_1km.tif")
 
 # Mumbai Bounding Box
 MIN_LAT, MAX_LAT = 18.85, 19.25
@@ -62,7 +63,12 @@ def fetch_authentic_radar_reflectivity():
         
         # Interpolate 5x5 matrix onto master 1km raster grid
         spline = RectBivariateSpline(sample_lats, sample_lons, dbz_matrix)
-        dwr_grid = spline(np.linspace(MIN_LAT, MAX_LAT, height), np.linspace(MIN_LON, MAX_LON, width)).astype(np.float32)
+        # The spline is evaluated over ASCENDING latitudes, but the master
+        # raster is north-up (row 0 = MAX_LAT), so the result is flipped
+        # before writing. Without this the layer is upside down relative
+        # to the DEM it is stacked with.
+        dwr_south_up = spline(np.linspace(MIN_LAT, MAX_LAT, height), np.linspace(MIN_LON, MAX_LON, width))
+        dwr_grid = np.flipud(dwr_south_up).astype(np.float32)
         dwr_grid = np.clip(dwr_grid, 0, None)
         
     else:

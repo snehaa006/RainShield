@@ -2,9 +2,9 @@ import os
 import numpy as np
 import rasterio
 from sklearn.preprocessing import MinMaxScaler
+from _paths import PROCESSED_DIR, RAW_DIR
 
-PROCESSED_DIR = "./processed_data"
-OUTPUT_TENSOR_PATH = "./processed_data/rainshield_stage1_tensor.npz"
+OUTPUT_TENSOR_PATH = str(PROCESSED_DIR / "rainshield_stage1_tensor.npz")
 
 FEATURE_FILES = [
     "dem_1km_master.tif",             # Feature 0: Elevation (m)

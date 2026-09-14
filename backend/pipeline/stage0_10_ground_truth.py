@@ -1,10 +1,11 @@
 import os
 import numpy as np
 import rasterio
+from _paths import PROCESSED_DIR, RAW_DIR
 
-MASTER_DEM_PATH = "./processed_data/dem_1km_master.tif"
-DEM_SLOPE_PATH = "./processed_data/slope_1km_master.tif"
-OUTPUT_NRSC_RASTER = "./processed_data/nrsc_flood_ground_truth_1km.tif"
+MASTER_DEM_PATH = str(PROCESSED_DIR / "dem_1km_master.tif")
+DEM_SLOPE_PATH = str(PROCESSED_DIR / "slope_1km_master.tif")
+OUTPUT_NRSC_RASTER = str(PROCESSED_DIR / "nrsc_flood_ground_truth_1km.tif")
 
 def generate_authentic_ground_truth_mask():
     print("[+] Processing 100% REAL Hydro-Topographic Ground Truth Inundation Layer...")

@@ -23,8 +23,6 @@ export interface GridCellStatic {
   wardId: string;
   elevation: number;
   slope: number;
-  /** Kilometres to the nearest drainage line or river. */
-  distanceToDrainage: number;
   landUse: LandUse;
   /** People per square kilometre. */
   population: number;
@@ -34,6 +32,11 @@ export interface GridCellStatic {
 
 /** Model output for one cell at one lead time. */
 export interface CellForecast {
+  /**
+   * Terrain flood susceptibility straight from the network, 0-1. The live
+   * rainfall drives `floodProbability` on top of this.
+   */
+  susceptibility: number;
   /** Nowcast rainfall intensity, mm/hr. */
   rainfallIntensity: number;
   /** Accumulated rainfall over the preceding 3 hours, mm. */
@@ -68,8 +71,13 @@ export interface RiskScore {
 export interface Ward {
   id: string;
   name: string;
-  /** Polygon ring, [lon, lat] pairs. */
-  boundary: [number, number][];
+  /** Administrative centre, [lon, lat]. */
+  centre: [number, number];
+  /**
+   * Outline rings, [lon, lat] pairs. Built by dissolving the ward's member
+   * cells, so it follows the 1 km grid rather than a smooth admin boundary.
+   */
+  boundary: [number, number][][];
 }
 
 /** Aggregated ward-level view used by the alert list and drill-down. */
@@ -87,16 +95,26 @@ export interface WardSummary {
   floodedCellCount: number;
 }
 
-/** A named historical or live event the dashboard can replay. */
-export interface Scenario {
-  id: string;
-  name: string;
-  description: string;
-  /** Basin-wide rainfall multiplier applied to the synthetic nowcast. */
-  intensity: number;
-  /** Storm centre as a fraction of the grid, 0-1 in each axis. */
-  centre: [number, number];
-  isHistorical: boolean;
+/** State of the live ingestion feed, reported alongside every forecast. */
+export interface FeedStatus {
+  /** Provider that produced the observation, e.g. "openmeteo". */
+  source: string;
+  fetchedAt: string;
+  ageSeconds: number;
+  /** True when upstream failed and cached or synthetic data is standing in. */
+  degraded: boolean;
+  notes: string[];
+  cacheTtl: number;
+}
+
+/** State of the inference backend. */
+export interface ModelStatus {
+  loaded: boolean;
+  /** "cnn-transformer" when the trained weights are serving. */
+  backend: string;
+  runtime: string;
+  weightsPresent: boolean;
+  error: string | null;
 }
 
 /** User-tunable inputs of the what-if simulator. */

@@ -1,24 +1,28 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { REGION } from '@/lib/config';
-import { toGeoJson } from '@/lib/forecast';
-import { WARDS } from '@/lib/grid';
+import { cellPolygon } from '@/lib/grid';
 import { INFRASTRUCTURE, INFRA_ICONS, INFRA_LABELS } from '@/lib/infrastructure';
 import { useDashboard } from '@/hooks/useDashboard';
 import { BASE_STYLE } from '@/components/map/mapStyle';
 import { paintCell } from '@/components/map/layerPaint';
+import type { Ward } from '@/types';
 
 const GRID_SOURCE = 'grid';
 const WARD_SOURCE = 'wards';
 
 export function FloodMap() {
-  const { cells, activeLayer, showInfrastructure, selectedWardId, selectCell, selectWard } =
+  const { cells, wards, activeLayer, showInfrastructure, selectedWardId, selectCell, selectWard } =
     useDashboard();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
-  const readyRef = useRef(false);
+  const labelsRef = useRef<maplibregl.Marker[]>([]);
+  // `ready` is state rather than a ref because the data effects below have to
+  // re-run once the style finishes loading: cells and wards now arrive from the
+  // API and routinely beat the map to it.
+  const [ready, setReady] = useState(false);
 
   // Latest handlers, so the map's event listeners are only bound once.
   const handlers = useRef({ selectCell, selectWard });
@@ -45,7 +49,7 @@ export function FloodMap() {
 
     map.on('load', () => {
       map.addSource(GRID_SOURCE, { type: 'geojson', data: emptyCollection() });
-      map.addSource(WARD_SOURCE, { type: 'geojson', data: wardCollection() });
+      map.addSource(WARD_SOURCE, { type: 'geojson', data: emptyCollection() });
 
       map.addLayer({
         id: 'grid-fill',
@@ -78,7 +82,6 @@ export function FloodMap() {
           'line-opacity': 0.8,
         },
       });
-      addWardLabels(map);
 
       map.on('click', 'grid-fill', (event) => {
         const feature = event.features?.[0];
@@ -93,14 +96,15 @@ export function FloodMap() {
         map.getCanvas().style.cursor = '';
       });
 
-      readyRef.current = true;
-      map.getSource(GRID_SOURCE) && refreshGrid(map, cells, activeLayer);
+      setReady(true);
     });
 
     return () => {
-      readyRef.current = false;
+      setReady(false);
       markersRef.current.forEach((marker) => marker.remove());
       markersRef.current = [];
+      labelsRef.current.forEach((marker) => marker.remove());
+      labelsRef.current = [];
       map.remove();
       mapRef.current = null;
     };
@@ -111,21 +115,39 @@ export function FloodMap() {
   // Push new model output / layer selection into the grid source.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !readyRef.current) return;
+    if (!map || !ready) return;
     refreshGrid(map, cells, activeLayer);
-  }, [cells, activeLayer]);
+  }, [ready, cells, activeLayer]);
+
+  // Ward outlines arrive with /api/region, so they are pushed in once available.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || wards.length === 0) return;
+    const source = map.getSource(WARD_SOURCE) as maplibregl.GeoJSONSource | undefined;
+    source?.setData(wardCollection(wards));
+
+    labelsRef.current.forEach((marker) => marker.remove());
+    labelsRef.current = wards.map((ward) => {
+      const element = document.createElement('span');
+      element.className =
+        'pointer-events-none select-none text-[11px] font-medium text-slate-400 ' +
+        '[text-shadow:0_1px_2px_#0b1220]';
+      element.textContent = ward.name;
+      return new maplibregl.Marker({ element }).setLngLat(ward.centre).addTo(map);
+    });
+  }, [ready, wards]);
 
   // Highlight the selected ward.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !readyRef.current) return;
-    WARDS.forEach((ward, index) => {
+    if (!map || !ready) return;
+    wards.forEach((ward, index) => {
       map.setFeatureState(
         { source: WARD_SOURCE, id: index },
         { selected: ward.id === selectedWardId },
       );
     });
-  }, [selectedWardId]);
+  }, [ready, wards, selectedWardId]);
 
   // Infrastructure overlay as DOM markers — few enough that symbols are overkill.
   useEffect(() => {
@@ -157,43 +179,35 @@ function refreshGrid(
   const source = map.getSource(GRID_SOURCE) as maplibregl.GeoJSONSource | undefined;
   if (!source) return;
 
-  const data = toGeoJson(cells);
-  data.features.forEach((feature, index) => {
-    const paint = paintCell(cells[index], layer);
-    feature.properties = { ...feature.properties, ...paint };
-  });
-  source.setData(data);
-}
-
-/** Ward names as DOM labels — avoids shipping a glyph server for symbol layers. */
-function addWardLabels(map: MapLibreMap) {
-  WARDS.forEach((ward) => {
-    const element = document.createElement('span');
-    element.className =
-      'pointer-events-none select-none text-[11px] font-medium text-slate-400 ' +
-      '[text-shadow:0_1px_2px_#0b1220]';
-    element.textContent = ward.name;
-    new maplibregl.Marker({ element }).setLngLat(centroid(ward.boundary)).addTo(map);
-  });
-}
-
-function centroid(ring: [number, number][]): [number, number] {
-  // The ring is closed, so the repeated final vertex is dropped before averaging.
-  const points = ring.slice(0, -1);
-  const sum = points.reduce<[number, number]>(
-    (acc, [lon, lat]) => [acc[0] + lon, acc[1] + lat],
-    [0, 0],
-  );
-  return [sum[0] / points.length, sum[1] / points.length];
-}
-
-function wardCollection(): GeoJSON.FeatureCollection {
-  return {
+  source.setData({
     type: 'FeatureCollection',
-    features: WARDS.map((ward, index) => ({
+    features: cells.map((cell, index) => ({
       type: 'Feature',
       id: index,
-      geometry: { type: 'Polygon', coordinates: [ward.boundary] },
+      geometry: { type: 'Polygon', coordinates: [cellPolygon(cell.row, cell.col)] },
+      properties: {
+        id: cell.id,
+        wardId: cell.wardId,
+        rainfall: cell.rainfallIntensity,
+        floodProbability: cell.floodProbability,
+        depth: cell.waterDepth,
+        risk: cell.risk.total,
+        tier: cell.tier,
+        population: cell.population,
+        ...paintCell(cell, layer),
+      },
+    })),
+  });
+}
+
+function wardCollection(wards: Ward[]): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: wards.map((ward, index) => ({
+      type: 'Feature',
+      id: index,
+      // A ward is a set of grid cells, so its outline can be several rings.
+      geometry: { type: 'MultiPolygon', coordinates: ward.boundary.map((ring) => [ring]) },
       properties: { id: ward.id, name: ward.name },
     })),
   };

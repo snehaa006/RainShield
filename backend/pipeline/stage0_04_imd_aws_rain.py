@@ -2,9 +2,10 @@ import os
 import numpy as np
 import rasterio
 from scipy.interpolate import Rbf
+from _paths import PROCESSED_DIR, RAW_DIR
 
-MASTER_DEM_PATH = "./processed_data/dem_1km_master.tif"
-OUTPUT_AWS_RASTER = "./processed_data/imd_aws_rain_1km.tif"
+MASTER_DEM_PATH = str(PROCESSED_DIR / "dem_1km_master.tif")
+OUTPUT_AWS_RASTER = str(PROCESSED_DIR / "imd_aws_rain_1km.tif")
 
 # Real-world IMD AWS Station Locations across Mumbai
 IMD_AWS_STATIONS = [
