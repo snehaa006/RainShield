@@ -138,9 +138,23 @@ exposure layers are read once from the Stage 1 tensor.
 
 A 5 × 5 mesh is requested and splined onto the 1 km grid — GFS is 11–25 km
 native, so this already over-samples it. Observations are cached for
-`RAINSHIELD_CACHE_TTL` (default 600 s). If the feed fails, the last good
-observation is reused; if there is none, the synthetic provider fills in. Both
-are flagged `degraded`.
+`RAINSHIELD_CACHE_TTL` (default 600 s).
+
+**Two live sources, because one is not enough.** Open-Meteo's free tier is
+capped *per IP*, and Render's outbound addresses are shared between customers —
+the first deploy was rejected with `429: Daily API request limit exceeded`
+before it had made a single successful call. So MET Norway's Locationforecast
+(keyless, no per-IP cap, an independent forecast rather than a retry) follows
+it. `RAINSHIELD_PROVIDER` names the *preferred* source, not the only one.
+
+met.no serves one coordinate per request, so its mesh is 3 × 3, and its series
+is forecast-only, so antecedent rainfall is unavailable and soil wetness uses
+the substitution below. Its terms require an identifying User-Agent — set
+`RAINSHIELD_USER_AGENT` to include a contact address.
+
+Only when *every* live source fails is the last good observation reused, then
+the synthetic field. Just those cases are flagged `degraded`: a working second
+source is still live data.
 
 > **Fixed along the way:** Stage 0 built the GPM, GFS, INSAT and DWR layers by
 > evaluating a spline over *ascending* latitudes and writing the result into a
@@ -169,7 +183,7 @@ GeoJSON features per refresh. Interactive docs at `/docs`.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `RAINSHIELD_PROVIDER` | `openmeteo` | `synthetic` for an offline demo |
+| `RAINSHIELD_PROVIDER` | `openmeteo` | preferred live source (`openmeteo`, `metno`); the others still follow as fallbacks. `synthetic` for an offline demo |
 | `RAINSHIELD_CACHE_TTL` | `600` | seconds an observation is reused |
 | `RAINSHIELD_MESH` | `5` | upstream sample mesh per axis |
 | `RAINSHIELD_CORS_ORIGINS` | `*` | comma-separated allowed origins |
@@ -182,22 +196,33 @@ Both `VITE_*` values are baked into the bundle at build time, so changing them
 on a host does nothing to an existing deployment — redeploy with the build cache
 off.
 
-## Deploying to Render
+## Deploying
 
-`render.yaml` is a blueprint for both services — point Render at the repo via
-**New → Blueprint**. It provisions:
+The dashboard runs on Vercel and the inference API on Render — two services, so
+the dashboard needs to be told where the API lives.
 
-- `rainshield-api` — Python web service from `backend/`, health-checked at
-  `/health`. The weights (726 KB) and rasters are committed, so there is nothing
-  to upload.
-- `rainshield-dashboard` — static site, with `VITE_API_BASE` wired to the API
-  service's hostname.
+**Backend (Render).** `render.yaml` describes the service: Python, built with
+`pip install -r backend/requirements.txt` and started with
 
-Set `VITE_BASEMAP_KEY` in the Render dashboard (it is marked `sync: false`), and
-narrow `RAINSHIELD_CORS_ORIGINS` to the dashboard origin once it is live.
+```
+uvicorn rainshield.api.app:app --app-dir backend --host 0.0.0.0 --port $PORT
+```
 
-On Render's free tier the API sleeps when idle, so the first request after a
-sleep pays a cold start.
+The commands run from the repository root rather than using `rootDir`, so the
+committed weights and rasters under `processed_data/` stay on the path. Nothing
+needs uploading — the checkpoint is 726 KB and is in the repo.
+
+**Frontend (Vercel).** Set `VITE_API_BASE` to the Render service URL in
+Project → Settings → Environment Variables, then **redeploy**. Vite inlines
+`VITE_*` at build time, so setting the variable alone does nothing to an
+existing deployment — it has to be rebuilt. Set `VITE_BASEMAP_KEY` the same way
+or the CARTO tiles carry a watermark.
+
+Without `VITE_API_BASE` the client calls its own origin, which on Vercel means
+`/api/*` 404s and the board shows "Cannot reach the inference API".
+
+On Render's free tier the API sleeps after inactivity, so the first request
+after a sleep pays a cold start of roughly a minute.
 
 ## Tests
 

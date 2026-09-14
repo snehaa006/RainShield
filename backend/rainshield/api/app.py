@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
@@ -24,6 +25,26 @@ from rainshield.service import (
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("rainshield")
 
+def _warm_cache() -> None:
+    """Pull the first observation in the background.
+
+    Without this the first visitor pays the upstream round trip plus the first
+    inference, which on a sleeping free-tier instance lands on top of an already
+    slow cold start. Runs off the startup path so a slow or unreachable feed
+    cannot hold up (or fail) the deploy.
+    """
+    try:
+        observation = get_observation()
+        log.info(
+            "warm-up observation: source=%s degraded=%s notes=%s",
+            observation.source,
+            observation.degraded,
+            "; ".join(observation.notes) or "-",
+        )
+    except Exception as exc:  # noqa: BLE001 — warm-up must never take the app down
+        log.warning("warm-up fetch failed: %s: %s", type(exc).__name__, exc)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Load weights and static layers at boot so the first request is fast."""
@@ -31,6 +52,7 @@ async def lifespan(_app: FastAPI):
     log.info("model backend=%s runtime=%s loaded=%s", status["backend"], status["runtime"], status["loaded"])
     if status["error"]:
         log.warning("model load issue: %s", status["error"])
+    threading.Thread(target=_warm_cache, name="warm-cache", daemon=True).start()
     yield
 
 

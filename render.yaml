@@ -1,5 +1,12 @@
-# Render blueprint: FastAPI inference backend + static dashboard.
-# Deploy with Render's "New > Blueprint" pointed at this repository.
+# Render blueprint for the RainShield inference API.
+#
+# The dashboard is deployed separately on Vercel, so only the backend lives
+# here. Point Vercel's VITE_API_BASE at this service's URL and redeploy it —
+# Vite inlines VITE_* at build time, so an existing bundle will not pick up
+# a change without a rebuild.
+#
+# The commands run from the repository root rather than using rootDir, so that
+# the committed weights and rasters under processed_data/ stay on the path.
 
 services:
   - type: web
@@ -7,38 +14,19 @@ services:
     runtime: python
     plan: free
     region: singapore          # closest Render region to the Mumbai study area
-    rootDir: backend
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn rainshield.api.app:app --host 0.0.0.0 --port $PORT
+    branch: sneha
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn rainshield.api.app:app --app-dir backend --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: "3.11.9"
       - key: RAINSHIELD_PROVIDER
-        value: openmeteo        # set to "synthetic" for an offline demo
+        value: auto             # preferred live source; the rest still follow
+                                # as fallbacks. "synthetic" for an offline demo.
       - key: RAINSHIELD_CACHE_TTL
         value: "600"            # seconds an observation is reused
       - key: RAINSHIELD_CORS_ORIGINS
-        value: "*"              # tighten to the dashboard origin once it is live
+        value: "*"              # public read-only API; no credentials are sent
       - key: PYTHONUNBUFFERED
         value: "1"
-
-  - type: web
-    name: rainshield-dashboard
-    runtime: static
-    plan: free
-    buildCommand: npm ci && npm run build
-    staticPublishPath: dist
-    envVars:
-      # Vite inlines VITE_* at build time, so changing this needs a redeploy.
-      - key: VITE_API_BASE
-        fromService:
-          name: rainshield-api
-          type: web
-          property: host       # bare hostname; the client prepends https://
-      - key: VITE_BASEMAP_KEY
-        sync: false             # set in the Render dashboard; not in git
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html

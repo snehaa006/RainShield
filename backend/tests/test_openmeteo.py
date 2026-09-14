@@ -115,3 +115,104 @@ def test_rejects_short_response(monkeypatch):
     monkeypatch.setattr(p, "_request", lambda: truncated)
     with pytest.raises(ValueError):
         p.fetch()
+
+
+# -- variable-tier fallback -------------------------------------------------
+#
+# Asking Open-Meteo for a variable it will not serve fails the WHOLE request, so
+# the provider drops the optional variables a tier at a time rather than losing
+# the rain field with them. These tests pin that behaviour, since the live API
+# is not reachable from CI.
+
+
+class _FakeResponse:
+    def __init__(self, status: int, payload=None, text: str = ""):
+        self.status_code = status
+        self.ok = 200 <= status < 300
+        self._payload = payload
+        self.text = text
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("no json")
+        return self._payload
+
+
+def _patch_requests(monkeypatch, handler):
+    """Route the provider's requests.get through `handler(fields) -> _FakeResponse`."""
+    import rainshield.ingest.openmeteo as om
+
+    def fake_get(url, params=None, timeout=None):
+        return handler(tuple(params["hourly"].split(",")))
+
+    monkeypatch.setattr(om.requests, "get", fake_get)
+
+
+def test_drops_unsupported_variable_and_keeps_rain(monkeypatch):
+    """Soil moisture is not served everywhere; the rain field must survive it."""
+    payload = _response()
+
+    def handler(fields):
+        if "soil_moisture_0_to_7cm" in fields:
+            return _FakeResponse(400, {"error": True, "reason": "Cannot initialize SoilMoisture"})
+        stripped = [
+            {**loc, "hourly": {k: v for k, v in loc["hourly"].items() if k in (*fields, "time")}}
+            for loc in payload
+        ]
+        return _FakeResponse(200, stripped)
+
+    _patch_requests(monkeypatch, handler)
+    observation = OpenMeteoProvider(mesh_size=MESH).fetch()
+    observation.validate()
+
+    assert not observation.degraded, "a substituted optional variable is not a degraded feed"
+    assert np.all(np.isfinite(observation.soil_moisture))
+    assert np.all((observation.soil_moisture >= 0.0) & (observation.soil_moisture <= 1.0))
+    assert any("soil_moisture" in note for note in observation.notes)
+
+
+def test_falls_back_to_precipitation_only(monkeypatch):
+    payload = _response()
+
+    def handler(fields):
+        if fields != ("precipitation",):
+            return _FakeResponse(400, {"error": True, "reason": "unsupported variable"})
+        stripped = [
+            {**loc, "hourly": {k: v for k, v in loc["hourly"].items() if k in ("precipitation", "time")}}
+            for loc in payload
+        ]
+        return _FakeResponse(200, stripped)
+
+    _patch_requests(monkeypatch, handler)
+    observation = OpenMeteoProvider(mesh_size=MESH).fetch()
+    observation.validate()
+    assert np.all(np.isfinite(observation.cloud_cover))
+
+
+def test_error_carries_the_upstream_reason(monkeypatch):
+    """"HTTPError" alone is useless on a host you cannot reach to reproduce."""
+    from rainshield.ingest.openmeteo import OpenMeteoError
+
+    _patch_requests(
+        monkeypatch,
+        lambda fields: _FakeResponse(429, {"error": True, "reason": "Daily API request limit exceeded"}),
+    )
+    with pytest.raises(OpenMeteoError, match="Daily API request limit exceeded"):
+        OpenMeteoProvider(mesh_size=MESH).fetch()
+
+
+def test_rate_limit_is_not_retried_across_tiers(monkeypatch):
+    """A 429 applies to the endpoint; retrying narrower only adds load."""
+    from rainshield.ingest.openmeteo import OpenMeteoError
+
+    calls = []
+
+    def handler(fields):
+        calls.append(fields)
+        return _FakeResponse(429, {"error": True, "reason": "Daily API request limit exceeded"})
+
+    _patch_requests(monkeypatch, handler)
+    with pytest.raises(OpenMeteoError):
+        OpenMeteoProvider(mesh_size=MESH).fetch()
+
+    assert len(calls) == 1, f"expected a single request, got {len(calls)}"

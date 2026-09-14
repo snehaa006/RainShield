@@ -78,3 +78,86 @@ def brightness_temp_from_cloud(cloud_pct: np.ndarray) -> np.ndarray:
     stand in for the INSAT-3D thermal channel.
     """
     return (298.15 - np.clip(cloud_pct, 0.0, 100.0) * 0.65).astype(np.float32)
+
+
+def assemble_observation(
+    *,
+    source: str,
+    now: datetime,
+    times: list[datetime],
+    precip: np.ndarray,
+    mesh_size: int,
+    cloud: np.ndarray | None = None,
+    soil: np.ndarray | None = None,
+    notes: list[str] | None = None,
+) -> "LiveObservation":
+    """Build an observation from per-mesh-point hourly series.
+
+    Shared by every provider so they differ only in how they obtain the series,
+    not in how lead times, accumulations and substitutions are derived.
+
+    `precip`, `cloud` and `soil` are (n_mesh_points, n_hours); `times` is the
+    hourly axis. Only precipitation is required — the rest are substituted when
+    a provider cannot supply them.
+    """
+    from rainshield.ingest.mesh import interpolate_mesh
+
+    # Index of the hour containing `now`.
+    idx = len(times) - 1
+    for i, stamp in enumerate(times):
+        if stamp > now:
+            idx = max(0, i - 1)
+            break
+
+    n_hours = precip.shape[1]
+    notes = list(notes or [])
+
+    def at(offset_minutes: int, series: np.ndarray) -> np.ndarray:
+        pos = idx + offset_minutes / 60.0
+        lo = min(max(int(np.floor(pos)), 0), n_hours - 1)
+        hi = min(lo + 1, n_hours - 1)
+        frac = pos - lo
+        return series[:, lo] * (1 - frac) + series[:, hi] * frac
+
+    def accum_3h(offset_minutes: int) -> np.ndarray:
+        end = idx + offset_minutes / 60.0
+        start = max(0.0, end - 3.0)
+        lo = min(max(int(np.floor(start)), 0), n_hours - 1)
+        hi = min(max(int(np.ceil(end)), lo + 1), n_hours)
+        return precip[:, lo:hi].sum(axis=1)
+
+    rain_rate = {lead: interpolate_mesh(at(lead, precip), mesh_size) for lead in LEAD_TIMES}
+    rain_3h = {lead: interpolate_mesh(accum_3h(lead), mesh_size) for lead in LEAD_TIMES}
+
+    antecedent = np.clip(
+        interpolate_mesh(precip[:, max(0, idx - 24) : idx + 1].sum(axis=1), mesh_size), 0.0, None
+    )
+
+    # Ground wets with the rain that has already fallen: a stand-in when the
+    # upstream serves no soil moisture. 60 mm over 24 hr saturates the top layer.
+    if soil is None:
+        soil_grid = np.clip(0.22 + antecedent / 60.0, 0.0, 1.0)
+    else:
+        soil_grid = np.clip(interpolate_mesh(at(0, soil), mesh_size), 0.0, 1.0)
+
+    # Cloud cover only feeds the brightness-temperature channel, which the
+    # network is barely sensitive to; overcast is the safe default in a storm.
+    cloud_grid = (
+        np.full_like(antecedent, 70.0)
+        if cloud is None
+        else np.clip(interpolate_mesh(at(0, cloud), mesh_size), 0.0, 100.0)
+    )
+
+    observation = LiveObservation(
+        source=source,
+        fetched_at=now,
+        rain_rate={k: np.clip(v, 0.0, None) for k, v in rain_rate.items()},
+        rain_3h={k: np.clip(v, 0.0, None) for k, v in rain_3h.items()},
+        soil_moisture=soil_grid,
+        cloud_cover=cloud_grid,
+        antecedent_24h=antecedent,
+        degraded=False,
+        notes=notes,
+    )
+    observation.validate()
+    return observation
