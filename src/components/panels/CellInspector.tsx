@@ -1,6 +1,5 @@
 import { CONFIDENCE_COLORS } from '@/lib/config';
 import { duration, fullNumber, metres, mmPerHour, percent } from '@/lib/format';
-import { WARDS } from '@/lib/grid';
 import { useDashboard } from '@/hooks/useDashboard';
 import { Panel } from '@/components/ui/Panel';
 import { TierBadge } from '@/components/ui/TierBadge';
@@ -16,7 +15,7 @@ const LAND_USE_LABELS: Record<string, string> = {
 
 /** Per-cell drill-down: the model inputs and the risk terms they produced. */
 export function CellInspector({ className = '' }: { className?: string }) {
-  const { selectedCell, selectCell } = useDashboard();
+  const { selectedCell, selectCell, wards } = useDashboard();
 
   if (!selectedCell) {
     return (
@@ -29,7 +28,7 @@ export function CellInspector({ className = '' }: { className?: string }) {
     );
   }
 
-  const ward = WARDS.find((w) => w.id === selectedCell.wardId);
+  const ward = wards.find((w) => w.id === selectedCell.wardId);
 
   return (
     <Panel
@@ -70,10 +69,13 @@ export function CellInspector({ className = '' }: { className?: string }) {
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px]">
           <Row label="Elevation" value={`${selectedCell.elevation.toFixed(1)} m`} />
           <Row label="Slope" value={`${selectedCell.slope.toFixed(1)}°`} />
-          <Row label="Distance to drainage" value={`${selectedCell.distanceToDrainage.toFixed(2)} km`} />
           <Row label="Land use" value={LAND_USE_LABELS[selectedCell.landUse]} />
           <Row label="Population" value={`${fullNumber(selectedCell.population)} /km²`} />
           <Row label="Infra proximity" value={percent(selectedCell.criticalInfraProximity)} />
+          <Row
+            label="Model susceptibility"
+            value={percent(selectedCell.susceptibility)}
+          />
         </dl>
       </div>
 

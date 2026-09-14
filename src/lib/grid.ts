@@ -1,148 +1,159 @@
+/**
+ * Grid geometry, assembled from the backend's static layers.
+ *
+ * This used to generate terrain from seeded noise. It now builds the same
+ * structures from `/api/region`, which serves the real SRTM/WorldPop/OSM layers
+ * out of the Stage 1 tensor — the exact values the model was trained on.
+ */
+
 import { REGION } from '@/lib/config';
-import { clamp, fbm } from '@/lib/math';
+import type { RegionPayload } from '@/lib/api';
 import type { GridCellStatic, LandUse, Ward } from '@/types';
 
-const SEED = 20260913;
-const [west, south, east, north] = REGION.bounds;
-const CELL_WIDTH = (east - west) / REGION.cols;
-const CELL_HEIGHT = (north - south) / REGION.rows;
-
-const WARD_NAMES = [
-  'Andheri West',
-  'Andheri East',
-  'Jogeshwari',
-  'Goregaon',
-  'Malad',
-  'Kurla',
-  'Chembur',
-  'Bandra East',
-  'Santacruz',
-  'Vile Parle',
-  'Powai',
-  'Ghatkopar',
-];
-
-const WARD_COLS = 3;
-const WARD_ROWS = 4;
-
-export const WARDS: Ward[] = buildWards();
-
 /**
- * Static terrain, land-use and exposure layers for the demo region.
- *
- * In production these come from the fusion engine (SRTM/Cartosat DEM, Bhuvan
- * LULC, OSM infrastructure, gridded census). Here they are generated from
- * seeded noise so the demo is deterministic and needs no network access.
+ * Flat index of a cell. Must match the backend, which ravels a (rows, cols)
+ * array row-major with row 0 on the northern edge.
  */
-export const GRID: GridCellStatic[] = buildGrid();
+export const cellIndex = (row: number, col: number): number => row * REGION.cols + col;
 
-/** Cell footprint as a GeoJSON-ready ring. */
-export function cellPolygon(cell: GridCellStatic): [number, number][] {
-  const x = west + cell.col * CELL_WIDTH;
-  const y = south + cell.row * CELL_HEIGHT;
+/** Cell footprint as a closed GeoJSON-ready ring. */
+export function cellPolygon(row: number, col: number): [number, number][] {
+  const [west, south, east, north] = REGION.bounds;
+  const width = (east - west) / REGION.cols;
+  const height = (north - south) / REGION.rows;
+
+  const x0 = west + col * width;
+  const x1 = x0 + width;
+  const y1 = north - row * height; // row 0 is the northern edge
+  const y0 = y1 - height;
+
   return [
-    [x, y],
-    [x + CELL_WIDTH, y],
-    [x + CELL_WIDTH, y + CELL_HEIGHT],
-    [x, y + CELL_HEIGHT],
-    [x, y],
+    [x0, y0],
+    [x1, y0],
+    [x1, y1],
+    [x0, y1],
+    [x0, y0],
   ];
 }
 
-function buildGrid(): GridCellStatic[] {
-  const cells: GridCellStatic[] = [];
+/** Build the static cell list from the region payload. */
+export function buildGrid(payload: RegionPayload): GridCellStatic[] {
+  const { cells, wards, region } = payload;
+  const out: GridCellStatic[] = [];
 
-  for (let row = 0; row < REGION.rows; row += 1) {
-    for (let col = 0; col < REGION.cols; col += 1) {
-      const nx = col / REGION.cols;
-      const ny = row / REGION.rows;
-
-      // A coastal plain rising to a low ridge inland, plus local relief.
-      const ridge = Math.sin(ny * Math.PI) * 38;
-      const elevation = clamp(
-        2 + ridge * nx + fbm(nx * 6, ny * 6, SEED) * 30 - 6,
-        0.5,
-        90,
-      );
-      const slope = clamp(fbm(nx * 8, ny * 8, SEED + 11) * 14, 0.2, 14);
-
-      // Drainage runs roughly north-south through the middle of the region.
-      const creekX = 0.42 + 0.16 * Math.sin(ny * Math.PI * 1.6);
-      const distanceToDrainage = clamp(
-        Math.abs(nx - creekX) * 14 + fbm(nx * 5, ny * 5, SEED + 7) * 1.4,
-        0.05,
-        12,
-      );
-
-      const urbanisation = clamp(
-        1 - Math.hypot(nx - 0.45, ny - 0.5) * 1.5 + fbm(nx * 4, ny * 4, SEED + 3) * 0.5,
-      );
-
-      cells.push({
+  for (let row = 0; row < region.rows; row += 1) {
+    for (let col = 0; col < region.cols; col += 1) {
+      const i = row * region.cols + col;
+      out.push({
         id: `c-${col}-${row}`,
-        col,
         row,
-        lon: west + (col + 0.5) * CELL_WIDTH,
-        lat: south + (row + 0.5) * CELL_HEIGHT,
-        wardId: wardIdFor(col, row),
-        elevation: round(elevation, 1),
-        slope: round(slope, 1),
-        distanceToDrainage: round(distanceToDrainage, 2),
-        landUse: landUseFor(urbanisation, elevation),
-        population: Math.round(1200 + urbanisation * 38_000 * (0.6 + fbm(nx * 7, ny * 7, SEED + 5))),
-        criticalInfraProximity: round(
-          clamp(urbanisation * 0.7 + fbm(nx * 9, ny * 9, SEED + 13) * 0.5),
-          2,
-        ),
+        col,
+        lon: cells.lon[i],
+        lat: cells.lat[i],
+        wardId: wards[cells.wardIndex[i]]?.id ?? 'unassigned',
+        elevation: cells.elevation[i],
+        slope: cells.slope[i],
+        landUse: cells.landUse[i] as LandUse,
+        population: cells.population[i],
+        criticalInfraProximity: cells.infraProximity[i],
       });
     }
   }
-
-  return cells;
+  return out;
 }
 
-function landUseFor(urbanisation: number, elevation: number): LandUse {
-  if (elevation < 2.5) return 'water';
-  if (urbanisation > 0.72) return 'urban-dense';
-  if (urbanisation > 0.5) return 'urban';
-  if (urbanisation > 0.3) return 'periurban';
-  return 'vegetation';
-}
+/**
+ * Build ward outlines by dissolving their member cells.
+ *
+ * The backend assigns each cell to its nearest ward centre, so a ward is a set
+ * of grid cells rather than a polygon. Taking every cell edge that exactly one
+ * of the ward's cells owns leaves only the outer boundary, and stitching those
+ * edges end-to-end turns them into rings. Drawing the cells directly would
+ * show all the interior edges instead.
+ */
+export function buildWards(payload: RegionPayload): Ward[] {
+  const { cells, wards, region } = payload;
+  const [west, south, east, north] = region.bounds;
+  const width = (east - west) / region.cols;
+  const height = (north - south) / region.rows;
 
-function wardIndex(col: number, row: number): number {
-  const wc = Math.min(WARD_COLS - 1, Math.floor((col / REGION.cols) * WARD_COLS));
-  const wr = Math.min(WARD_ROWS - 1, Math.floor((row / REGION.rows) * WARD_ROWS));
-  return wr * WARD_COLS + wc;
-}
+  // Work in integer lattice coordinates so shared edges compare exactly.
+  const key = (x: number, y: number) => `${x},${y}`;
+  const toLngLat = (x: number, y: number): [number, number] => [
+    west + x * width,
+    north - y * height,
+  ];
 
-function wardIdFor(col: number, row: number): string {
-  return `w-${wardIndex(col, row)}`;
-}
+  return wards.map((ward, wardIdx) => {
+    const edges = new Map<string, [number, number, number, number]>();
 
-function buildWards(): Ward[] {
-  return WARD_NAMES.map((name, index) => {
-    const wc = index % WARD_COLS;
-    const wr = Math.floor(index / WARD_COLS);
-    const x0 = west + (wc / WARD_COLS) * (east - west);
-    const x1 = west + ((wc + 1) / WARD_COLS) * (east - west);
-    const y0 = south + (wr / WARD_ROWS) * (north - south);
-    const y1 = south + ((wr + 1) / WARD_ROWS) * (north - south);
+    for (let row = 0; row < region.rows; row += 1) {
+      for (let col = 0; col < region.cols; col += 1) {
+        if (cells.wardIndex[row * region.cols + col] !== wardIdx) continue;
+        // Four edges of this cell, each as an ordered vertex pair.
+        const corners: [number, number, number, number][] = [
+          [col, row, col + 1, row],
+          [col + 1, row, col + 1, row + 1],
+          [col + 1, row + 1, col, row + 1],
+          [col, row + 1, col, row],
+        ];
+        for (const edge of corners) {
+          const [x1, y1, x2, y2] = edge;
+          // An interior edge is traversed once in each direction; cancel both.
+          const opposite = `${key(x2, y2)}|${key(x1, y1)}`;
+          if (edges.has(opposite)) edges.delete(opposite);
+          else edges.set(`${key(x1, y1)}|${key(x2, y2)}`, edge);
+        }
+      }
+    }
 
     return {
-      id: `w-${index}`,
-      name,
-      boundary: [
-        [x0, y0],
-        [x1, y0],
-        [x1, y1],
-        [x0, y1],
-        [x0, y0],
-      ] as [number, number][],
+      id: ward.id,
+      name: ward.name,
+      centre: [ward.lon, ward.lat] as [number, number],
+      boundary: stitchRings(edges, toLngLat),
     };
   });
 }
 
-function round(value: number, digits: number): number {
-  const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
+/** Chain boundary edges into closed rings, following each vertex to the next. */
+function stitchRings(
+  edges: Map<string, [number, number, number, number]>,
+  toLngLat: (x: number, y: number) => [number, number],
+): [number, number][][] {
+  const next = new Map<string, [number, number, number, number][]>();
+  for (const edge of edges.values()) {
+    const from = `${edge[0]},${edge[1]}`;
+    const list = next.get(from);
+    if (list) list.push(edge);
+    else next.set(from, [edge]);
+  }
+
+  const rings: [number, number][][] = [];
+  const remaining = new Set(edges.values());
+
+  while (remaining.size > 0) {
+    const start = remaining.values().next().value as [number, number, number, number];
+    const ring: [number, number][] = [toLngLat(start[0], start[1])];
+
+    let edge: [number, number, number, number] | undefined = start;
+    while (edge) {
+      remaining.delete(edge);
+      const candidates = next.get(`${edge[2]},${edge[3]}`);
+      const following = candidates?.find((candidate) => remaining.has(candidate));
+      ring.push(toLngLat(edge[2], edge[3]));
+      if (!following) break;
+      edge = following;
+    }
+
+    // Close the ring; drop degenerate fragments that cannot form a polygon.
+    if (ring.length > 3) {
+      const [firstLon, firstLat] = ring[0];
+      const [lastLon, lastLat] = ring[ring.length - 1];
+      if (firstLon !== lastLon || firstLat !== lastLat) ring.push(ring[0]);
+      rings.push(ring);
+    }
+  }
+
+  return rings;
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { REGION, SCENARIOS } from '@/lib/config';
+import { REGION } from '@/lib/config';
 import { useDashboard } from '@/hooks/useDashboard';
 import { TierBadge } from '@/components/ui/TierBadge';
 import type { ViewId } from '@/views';
@@ -12,7 +12,7 @@ interface HeaderProps {
 
 /** Product title, primary view tabs and live status. */
 export function Header({ view, onViewChange }: HeaderProps) {
-  const { scenario, setScenarioId, regionSummary } = useDashboard();
+  const { regionSummary, feed, isUpdating, refresh } = useDashboard();
 
   return (
     <header className="shrink-0 border-b border-surface-border bg-surface-deep">
@@ -46,20 +46,31 @@ export function Header({ view, onViewChange }: HeaderProps) {
         </nav>
 
         <div className="ml-auto flex shrink-0 items-center gap-3">
-          <select
-            value={scenario.id}
-            onChange={(event) => setScenarioId(event.target.value)}
-            aria-label="Scenario"
-            className="rounded-[10px] border border-surface-border bg-white/[0.04] px-2.5 py-1.5
-              text-[12px] text-slate-200 outline-none transition-colors hover:bg-white/[0.08]
-              focus:border-accent"
+          <button
+            type="button"
+            onClick={refresh}
+            disabled={isUpdating}
+            title={
+              feed
+                ? `Feed: ${feed.source}, ${Math.round(feed.ageSeconds)}s old. Click to re-pull.`
+                : 'Re-pull the live feed'
+            }
+            className="flex items-center gap-2 rounded-[10px] border border-surface-border
+              bg-white/[0.04] px-2.5 py-1.5 text-[12px] text-slate-200 outline-none
+              transition-colors hover:bg-white/[0.08] focus:border-accent
+              disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {SCENARIOS.map((option) => (
-              <option key={option.id} value={option.id} className="bg-surface-raised">
-                {option.isHistorical ? `↺ ${option.name}` : option.name}
-              </option>
-            ))}
-          </select>
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                isUpdating
+                  ? 'animate-pulse bg-accent'
+                  : feed?.degraded
+                    ? 'bg-tier-warning'
+                    : 'bg-tier-normal'
+              }`}
+            />
+            {isUpdating ? 'Updating' : 'Live'}
+          </button>
           <Clock />
           <TierBadge tier={regionSummary.tier} size="md" pulse={regionSummary.tier !== 'NORMAL'} />
         </div>

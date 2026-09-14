@@ -1,8 +1,4 @@
-import { useMemo } from 'react';
-import { DEFAULT_WHAT_IF } from '@/lib/config';
-import { getForecast } from '@/lib/forecast';
 import { compactNumber, metres, percent } from '@/lib/format';
-import { summariseRegion } from '@/lib/riskEngine';
 import { useDashboard } from '@/hooks/useDashboard';
 import { Panel } from '@/components/ui/Panel';
 import { Slider } from '@/components/ui/Slider';
@@ -12,13 +8,12 @@ import { Slider } from '@/components/ui/Slider';
  * against the unmodified forecast for the same horizon.
  */
 export function WhatIfSimulator({ className = '' }: { className?: string }) {
-  const { scenario, lead, whatIf, setWhatIf, resetWhatIf, regionSummary, isSimulating } =
+  const { whatIf, setWhatIf, resetWhatIf, regionSummary, baselineSummary, isSimulating } =
     useDashboard();
 
-  const baseline = useMemo(
-    () => summariseRegion(getForecast(scenario, lead, DEFAULT_WHAT_IF)),
-    [scenario, lead],
-  );
+  // The backend scores the same horizon with the sliders at their defaults, so
+  // the deltas below compare like with like.
+  const baseline = baselineSummary;
 
   return (
     <Panel

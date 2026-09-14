@@ -7,5 +7,14 @@ export default defineConfig({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
-  server: { host: true, port: 5173 },
+  server: {
+    host: true,
+    port: 5173,
+    // With VITE_API_BASE unset the client calls same-origin, so proxy the API
+    // to a locally running backend. Set VITE_API_BASE to point elsewhere.
+    proxy: {
+      '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+      '/health': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+    },
+  },
 });

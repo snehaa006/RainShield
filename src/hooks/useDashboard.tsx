@@ -1,12 +1,41 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
-import { DEFAULT_WHAT_IF, LEAD_TIMES, SCENARIOS } from '@/lib/config';
-import { getForecast, getRegionSeries } from '@/lib/forecast';
-import { WARDS } from '@/lib/grid';
-import { summariseRegion, summariseWard } from '@/lib/riskEngine';
-import type { LayerId, LeadTime, ScoredCell, WhatIfSettings } from '@/types';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
+import { DEFAULT_WHAT_IF, REFRESH_INTERVAL_MS } from '@/lib/config';
+import {
+  ApiError,
+  EMPTY_SUMMARY,
+  fetchForecast,
+  fetchRegion,
+  fetchSeries,
+  refreshFeed,
+  type ForecastPayload,
+  type RegionPayload,
+  type RegionSummary,
+  type SeriesPayload,
+  type SeriesPoint,
+} from '@/lib/api';
+import { buildGrid, buildWards } from '@/lib/grid';
+import { tierFor } from '@/lib/riskEngine';
+import type {
+  FeedStatus,
+  GridCellStatic,
+  LayerId,
+  LeadTime,
+  ModelStatus,
+  ScoredCell,
+  Ward,
+  WardSummary,
+  WhatIfSettings,
+} from '@/types';
 
 interface DashboardState {
-  scenarioId: string;
   lead: LeadTime;
   whatIf: WhatIfSettings;
   activeLayer: LayerId;
@@ -16,16 +45,29 @@ interface DashboardState {
 }
 
 interface DashboardValue extends DashboardState {
-  scenario: (typeof SCENARIOS)[number];
+  /** Static grid, empty until /api/region resolves. */
+  grid: GridCellStatic[];
+  wards: Ward[];
   cells: ScoredCell[];
-  wardSummaries: ReturnType<typeof summariseWard>[];
-  regionSummary: ReturnType<typeof summariseRegion>;
-  regionSeries: ReturnType<typeof getRegionSeries>;
-  selectedWard: ReturnType<typeof summariseWard> | null;
+  wardSummaries: WardSummary[];
+  /** Zeroed until the first forecast lands, so panels never guard on null. */
+  regionSummary: RegionSummary;
+  regionSeries: SeriesPoint[];
+  /** The same horizon with the sliders at their defaults, for what-if deltas. */
+  baselineSummary: RegionSummary;
+  selectedWard: WardSummary | null;
   selectedCell: ScoredCell | null;
-  /** True when the what-if simulator is changing the baseline forecast. */
+  confidence: 'LOW' | 'MEDIUM' | 'HIGH';
+  feed: FeedStatus | null;
+  model: ModelStatus | null;
+  generatedAt: string | null;
+  /** True before the first successful load. */
+  isLoading: boolean;
+  /** True while a refresh is in flight over data that is already on screen. */
+  isUpdating: boolean;
+  error: string | null;
   isSimulating: boolean;
-  setScenarioId: (id: string) => void;
+  refresh: () => void;
   setLead: (lead: LeadTime) => void;
   setWhatIf: (settings: Partial<WhatIfSettings>) => void;
   resetWhatIf: () => void;
@@ -39,7 +81,6 @@ const DashboardContext = createContext<DashboardValue | null>(null);
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<DashboardState>({
-    scenarioId: SCENARIOS[1].id,
     lead: 120,
     whatIf: DEFAULT_WHAT_IF,
     activeLayer: 'risk',
@@ -48,36 +89,146 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     selectedCellId: null,
   });
 
+  const [region, setRegion] = useState<RegionPayload | null>(null);
+  const [forecast, setForecast] = useState<ForecastPayload | null>(null);
+  const [series, setSeries] = useState<SeriesPayload | null>(null);
+  const [baseline, setBaseline] = useState<RegionSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
+
   const patch = (next: Partial<DashboardState>) => setState((prev) => ({ ...prev, ...next }));
 
-  const scenario = useMemo(
-    () => SCENARIOS.find((s) => s.id === state.scenarioId) ?? SCENARIOS[0],
-    [state.scenarioId],
-  );
+  // The static grid is fetched once — terrain and exposure do not change.
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchRegion(controller.signal)
+      .then(setRegion)
+      .catch((cause) => {
+        if (controller.signal.aborted) return;
+        setError(cause instanceof ApiError ? cause.message : String(cause));
+      });
+    return () => controller.abort();
+  }, []);
 
-  const cells = useMemo(
-    () => getForecast(scenario, state.lead, state.whatIf),
-    [scenario, state.lead, state.whatIf],
-  );
+  // Forecast and trend follow the lead time, the what-if sliders and refreshes.
+  const { lead, whatIf } = state;
+  useEffect(() => {
+    const controller = new AbortController();
+    setIsUpdating(true);
 
-  const wardSummaries = useMemo(() => {
-    const byWard = new Map<string, ScoredCell[]>();
-    cells.forEach((cell) => {
-      const list = byWard.get(cell.wardId);
-      if (list) list.push(cell);
-      else byWard.set(cell.wardId, [cell]);
+    Promise.all([
+      fetchForecast(lead, whatIf, controller.signal),
+      fetchSeries(whatIf, controller.signal),
+    ])
+      .then(([nextForecast, nextSeries]) => {
+        if (controller.signal.aborted) return;
+        setForecast(nextForecast);
+        setSeries(nextSeries);
+        setError(null);
+      })
+      .catch((cause) => {
+        if (controller.signal.aborted) return;
+        setError(cause instanceof ApiError ? cause.message : String(cause));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsUpdating(false);
+      });
+
+    return () => controller.abort();
+  }, [lead, whatIf, reloadToken]);
+
+  // The unmodified forecast for the same horizon, so the what-if panel can show
+  // a delta. Only fetched while the sliders are off their defaults.
+  const simulating =
+    whatIf.extraRainfall !== DEFAULT_WHAT_IF.extraRainfall ||
+    whatIf.soilSaturation !== DEFAULT_WHAT_IF.soilSaturation ||
+    whatIf.drainageCapacity !== DEFAULT_WHAT_IF.drainageCapacity;
+
+  useEffect(() => {
+    if (!simulating) {
+      setBaseline(null);
+      return undefined;
+    }
+    const controller = new AbortController();
+    fetchForecast(lead, DEFAULT_WHAT_IF, controller.signal)
+      .then((payload) => {
+        if (!controller.signal.aborted) setBaseline(payload.summary);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [lead, simulating, reloadToken]);
+
+  // Poll so the board keeps pace with the feed without a manual reload.
+  useEffect(() => {
+    const timer = window.setInterval(() => setReloadToken((n) => n + 1), REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const refresh = useCallback(() => {
+    // Ask the backend to drop its cached observation, then reload either way:
+    // a failed refresh should still re-render whatever the API can serve.
+    refreshFeed()
+      .catch(() => undefined)
+      .finally(() => setReloadToken((n) => n + 1));
+  }, []);
+
+  const grid = useMemo(() => (region ? buildGrid(region) : []), [region]);
+  const wards = useMemo(() => (region ? buildWards(region) : []), [region]);
+
+  // Join the static grid with the current forecast into the scored cells the
+  // panels and map consume.
+  const cells = useMemo<ScoredCell[]>(() => {
+    if (!forecast || grid.length === 0) return [];
+    const { cells: c, riskComponents: rc } = forecast;
+    if (c.risk.length !== grid.length) return [];
+
+    return grid.map((cell, i) => ({
+      ...cell,
+      susceptibility: c.susceptibility[i],
+      rainfallIntensity: c.rainfallIntensity[i],
+      rainfall3h: c.rainfall3h[i],
+      floodProbability: c.floodProbability[i],
+      waterDepth: c.waterDepth[i],
+      timeToInundation: c.timeToInundation[i],
+      confidence: forecast.confidence,
+      risk: {
+        total: c.risk[i],
+        components: {
+          rainfallSeverity: rc.rainfall_severity?.[i] ?? 0,
+          floodProbability: rc.flood_probability?.[i] ?? 0,
+          waterDepth: rc.water_depth?.[i] ?? 0,
+          populationExposure: rc.population_exposure?.[i] ?? 0,
+          criticalInfra: rc.critical_infra?.[i] ?? 0,
+        },
+      },
+      tier: tierFor(c.risk[i]),
+    }));
+  }, [forecast, grid]);
+
+  const wardById = useMemo(() => new Map(wards.map((ward) => [ward.id, ward])), [wards]);
+
+  const wardSummaries = useMemo<WardSummary[]>(() => {
+    if (!forecast) return [];
+    return forecast.wards.flatMap((summary) => {
+      const ward = wardById.get(summary.id);
+      if (!ward) return [];
+      return [
+        {
+          ward,
+          tier: summary.tier as WardSummary['tier'],
+          risk: summary.risk,
+          peakFloodProbability: summary.peakFloodProbability,
+          peakWaterDepth: summary.peakWaterDepth,
+          timeToInundation: summary.timeToInundation,
+          confidence: summary.confidence,
+          populationAtRisk: summary.populationAtRisk,
+          cellCount: summary.cellCount,
+          floodedCellCount: summary.floodedCellCount,
+        },
+      ];
     });
-    return WARDS.map((ward) => summariseWard(ward, byWard.get(ward.id) ?? [])).sort(
-      (a, b) => b.risk - a.risk,
-    );
-  }, [cells]);
-
-  const regionSummary = useMemo(() => summariseRegion(cells), [cells]);
-
-  const regionSeries = useMemo(
-    () => getRegionSeries(scenario, LEAD_TIMES, state.whatIf),
-    [scenario, state.whatIf],
-  );
+  }, [forecast, wardById]);
 
   const selectedWard = useMemo(
     () => wardSummaries.find((w) => w.ward.id === state.selectedWardId) ?? null,
@@ -91,19 +242,33 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const value: DashboardValue = {
     ...state,
-    scenario,
+    grid,
+    wards,
     cells,
     wardSummaries,
-    regionSummary,
-    regionSeries,
+    regionSummary: forecast?.summary ?? EMPTY_SUMMARY,
+    regionSeries: series?.series ?? [],
+    baselineSummary: baseline ?? forecast?.summary ?? EMPTY_SUMMARY,
     selectedWard,
     selectedCell,
-    isSimulating:
-      state.whatIf.extraRainfall !== DEFAULT_WHAT_IF.extraRainfall ||
-      state.whatIf.soilSaturation !== DEFAULT_WHAT_IF.soilSaturation ||
-      state.whatIf.drainageCapacity !== DEFAULT_WHAT_IF.drainageCapacity,
-    setScenarioId: (scenarioId) => patch({ scenarioId }),
-    setLead: (lead) => patch({ lead }),
+    confidence: forecast?.confidence ?? 'MEDIUM',
+    feed: forecast?.observation ?? null,
+    model: forecast
+      ? {
+          loaded: forecast.model.loaded,
+          backend: forecast.model.backend,
+          runtime: forecast.model.runtime,
+          weightsPresent: forecast.model.weights_present,
+          error: forecast.model.error,
+        }
+      : null,
+    generatedAt: forecast?.generatedAt ?? null,
+    isLoading: cells.length === 0 && !error,
+    isUpdating,
+    error,
+    isSimulating: simulating,
+    refresh,
+    setLead: (nextLead) => patch({ lead: nextLead }),
     setWhatIf: (settings) =>
       setState((prev) => ({ ...prev, whatIf: { ...prev.whatIf, ...settings } })),
     resetWhatIf: () => patch({ whatIf: DEFAULT_WHAT_IF }),
