@@ -155,3 +155,19 @@ def test_chain_falls_back_to_synthetic_when_all_sources_fail(monkeypatch):
     assert observation.degraded
     assert any("every live source failed" in n for n in observation.notes)
     ingest.clear_cache()
+
+
+def test_named_provider_is_a_preference_not_a_pin():
+    """A named source must still fall back, or a rate limit means invented data."""
+    from rainshield.ingest import build_providers
+
+    assert [p.name for p in build_providers("openmeteo")] == ["openmeteo", "metno"]
+    assert [p.name for p in build_providers("metno")] == ["metno", "openmeteo"]
+    assert [p.name for p in build_providers("auto")] == ["openmeteo", "metno"]
+
+
+def test_synthetic_never_reaches_for_a_live_source():
+    """The offline setting exists to stay off the network."""
+    from rainshield.ingest import build_providers
+
+    assert [p.name for p in build_providers("synthetic")] == ["synthetic"]

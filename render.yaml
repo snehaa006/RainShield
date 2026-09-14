@@ -22,7 +22,8 @@ services:
       - key: PYTHON_VERSION
         value: "3.11.9"
       - key: RAINSHIELD_PROVIDER
-        value: openmeteo        # set to "synthetic" for an offline demo
+        value: auto             # preferred live source; the rest still follow
+                                # as fallbacks. "synthetic" for an offline demo.
       - key: RAINSHIELD_CACHE_TTL
         value: "600"            # seconds an observation is reused
       - key: RAINSHIELD_CORS_ORIGINS
