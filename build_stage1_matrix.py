@@ -9,7 +9,7 @@ OUTPUT_TENSOR_PATH = "./processed_data/rainshield_stage1_tensor.npz"
 FEATURE_FILES = [
     "dem_1km_master.tif",             # Feature 0: Elevation (m)
     "slope_1km_master.tif",           # Feature 1: Terrain Slope (deg)
-    "infrastructure_1km.tif",        # Feature 2: Building/Road Count
+    "infra_density_1km.tif",          # Feature 2: Building/Road Count
     "population_1km.tif",            # Feature 3: Population Density
     "imd_aws_rain_1km.tif",           # Feature 4: IMD AWS Rain (mm/hr)
     "cwc_river_hydrology_1km.tif",   # Feature 5: River Overflow Index
