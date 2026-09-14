@@ -22,18 +22,18 @@ def process_river_hydrology():
         meta = master_src.meta.copy()
         transform = master_src.transform
 
-    # Create coordinate grids
+    # Create coordinate grid matching exact (height, width) matrix
     cols, rows = np.meshgrid(np.arange(width), np.arange(height))
     grid_lons, grid_lats = rasterio.transform.xy(transform, rows, cols)
-    grid_lons = np.array(grid_lons)
-    grid_lats = np.array(grid_lats)
+    
+    grid_lons = np.array(grid_lons).reshape((height, width))
+    grid_lats = np.array(grid_lats).reshape((height, width))
 
     hydrology_risk_grid = np.zeros((height, width), dtype=np.float32)
 
     # Compute exponential decay risk buffer around river gauges based on danger ratio
     for station in CWC_GAUGE_STATIONS:
         st_lon, st_lat = station['lon'], station['lat']
-        # Calculate water ratio relative to danger mark
         water_ratio = station['water_level_m'] / station['danger_level_m']
         
         # Euclidean spatial distance grid in degrees (~111km per deg)
