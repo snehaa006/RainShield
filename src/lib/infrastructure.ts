@@ -1,6 +1,6 @@
 
 import { mulberry32 } from '@/lib/math';
-import type { RegionDescriptor, ScoredCell } from '@/types';
+import type { PumpStationInfo, RegionDescriptor, ScoredCell } from '@/types';
 
 export type InfraType = 'hospital' | 'school' | 'bridge' | 'shelter' | 'pumping-station';
 
@@ -36,19 +36,45 @@ export const INFRA_ICONS: Record<InfraType, string> = {
  */
 const CACHE = new Map<string, InfraAsset[]>();
 
-export function infrastructureFor(region: RegionDescriptor | null): InfraAsset[] {
+/**
+ * Critical assets to draw over a region.
+ *
+ * `stations` are the real ones the API serves, and they replace what used to
+ * be four invented "Pumping Station 1..4" at random coordinates. Those were
+ * drawn over real terrain next to real hospitals, which is exactly how an
+ * invented asset ends up being read as a surveyed one. The remaining
+ * categories are still laid out procedurally and still labelled generically;
+ * they are placeholders for an OSM extract, not claims about specific
+ * buildings.
+ */
+export function infrastructureFor(
+  region: RegionDescriptor | null,
+  stations: PumpStationInfo[] = [],
+): InfraAsset[] {
   if (!region) return [];
-  const cached = CACHE.get(region.id);
+  const key = `${region.id}:${stations.length}`;
+  const cached = CACHE.get(key);
   if (cached) return cached;
-  const built = buildInfrastructure(region);
-  CACHE.set(region.id, built);
+  const built = [...buildInfrastructure(region), ...stationAssets(stations)];
+  CACHE.set(key, built);
   return built;
+}
+
+function stationAssets(stations: PumpStationInfo[]): InfraAsset[] {
+  return stations.map((station) => ({
+    id: `pump-${station.id}`,
+    name: station.name,
+    type: 'pumping-station' as const,
+    lon: station.lon,
+    lat: station.lat,
+  }));
 }
 
 /** Assets whose cell is expected to flood, ordered by severity. */
 export function exposedAssets(
   cells: ScoredCell[],
   region: RegionDescriptor | null,
+  stations: PumpStationInfo[] = [],
 ): (InfraAsset & { depth: number })[] {
   if (!region) return [];
   const byKey = new Map(cells.map((c) => [`${c.col}:${c.row}`, c]));
@@ -56,7 +82,7 @@ export function exposedAssets(
   const cellWidth = (east - west) / region.cols;
   const cellHeight = (north - south) / region.rows;
 
-  return infrastructureFor(region).map((asset) => {
+  return infrastructureFor(region, stations).map((asset) => {
     const col = Math.floor((asset.lon - west) / cellWidth);
     const row = Math.floor((asset.lat - south) / cellHeight);
     const cell = byKey.get(`${col}:${row}`);
@@ -77,7 +103,6 @@ function buildInfrastructure(region: RegionDescriptor): InfraAsset[] {
     { type: 'school', count: 9, prefix: 'Municipal School' },
     { type: 'bridge', count: 7, prefix: 'Underpass' },
     { type: 'shelter', count: 5, prefix: 'Relief Centre' },
-    { type: 'pumping-station', count: 4, prefix: 'Pumping Station' },
   ];
 
   return plan.flatMap(({ type, count, prefix }) =>

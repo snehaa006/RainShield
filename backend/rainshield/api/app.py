@@ -24,6 +24,7 @@ from rainshield.models.predictor import model_status
 from rainshield.regions import PRIMARY_REGION_ID, get_region, region_ids
 from rainshield.service import (
     cell_series_payload,
+    drainage_payload,
     forecast_payload,
     observation_meta,
     observation_payload,
@@ -173,6 +174,49 @@ def observation(region: str = RegionQuery) -> dict:
     region_id = _resolve_region(region)
     try:
         return observation_payload(region_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/drainage", tags=["drainage"])
+def drainage(
+    lead: int = Query(0, description="Lead time in minutes"),
+    extra_rainfall: float = Query(0.0, ge=0, le=300),
+    soil_saturation: float = Query(1.0, ge=0.5, le=1.5),
+    drainage_capacity: float = Query(1.0, ge=0.3, le=1.2),
+    tide: float | None = Query(
+        None, ge=-3.0, le=10.0,
+        description=(
+            "Pin sea level in metres above chart datum instead of using the "
+            "harmonic prediction. Use it to ask what the same rain would do at "
+            "high water — the answer changes, which is the point."
+        ),
+    ),
+    pump_availability: float = Query(
+        1.0, ge=0.0, le=1.0,
+        description="Fraction of installed pump capacity actually running.",
+    ),
+    region: str = RegionQuery,
+) -> dict:
+    """Catchment mass balance: is there enough pumping capacity for this rain?
+
+    Per drainage catchment, the runoff arriving at the outfall against the
+    gravity discharge and pump capacity available to remove it, and the
+    shortfall expressed as additional pumps. Independent of the hazard model —
+    nothing here changes the risk scores.
+    """
+    region_id = _resolve_region(region)
+    settings = WhatIf(extra_rainfall, soil_saturation, drainage_capacity)
+    try:
+        return drainage_payload(
+            lead,
+            settings,
+            region_id=region_id,
+            tide_override_m=tide,
+            pump_availability=pump_availability,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 

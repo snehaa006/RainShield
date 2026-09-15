@@ -175,6 +175,7 @@ backend/
                          simulator, the arrival log and the feed clock
     models/              network definition, torch-free checkpoint reader + forward pass
     hazard.py            susceptibility × rainfall → probability, depth, onset
+    hydro/               tides, drainage terrain, catchments, pumping, the solver
     risk.py              composite score, tiers, ward roll-ups
     service.py           the payloads the dashboard consumes
     api/app.py           FastAPI routes
@@ -184,8 +185,9 @@ backend/
     stage2_train         trains RainShieldNet, saves weights + risk raster
     stage3_dashboard     the 4-panel validation figure
     infer_realtime       standalone live scoring
-  tests/                 81 tests: checkpoint, numpy/torch equivalence, ingest,
-                         hazard, API, the region registry and the feed
+  tests/                 177 tests: checkpoint, numpy/torch equivalence, ingest,
+                         hazard, API, the region registry, the feed, the drainage
+                         balance and the solver's mass closure
 src/                     the React dashboard
 processed_data/          aligned rasters, the Stage 1 tensor, the trained weights
 ```
@@ -220,8 +222,16 @@ P(flood) = susceptibility × (1 − exp(−effective_rain / 45 mm))
 
 No rain gives no flooding however low-lying the cell; sustained heavy rain
 saturates toward that cell's susceptibility. `effective_rain` scales the 3-hour
-accumulation by antecedent soil wetness and drainage capacity. Composite risk
-then follows the architecture spec and is tunable in `config.py`:
+accumulation by antecedent soil wetness and drainage capacity.
+
+**This is the default path, and it conserves nothing.** Every cell is evaluated
+independently, so rain landing on a hillside raises that hillside's flood
+probability and never arrives in the basin below; a pumped cell is no drier than
+its neighbour; water does not move. `RAINSHIELD_SOLVER=physics` swaps it for a
+mass-conserving solver — see
+[Physics](#physics-drainage-pumping-and-routing).
+
+Composite risk then follows the architecture spec and is tunable in `config.py`:
 
 ```
 Risk = 0.35 rainfall severity + 0.30 flood probability + 0.20 water depth
@@ -243,6 +253,134 @@ pass in NumPy alone, matching torch to ~2 × 10⁻⁶. For a 175k-parameter mode
 one 45 × 39 grid, torch bought nothing and cost a ~2.5 GB dependency and a slow
 cold start. Torch is still needed to *train* — see `requirements-dev.txt`, which
 also runs the equivalence test.
+
+## Physics: drainage, pumping and routing
+
+A pure CNN prediction is not a flood model. Nothing in it conserves mass, water
+never flows between cells, and rain on a slope vanishes where it fell instead of
+arriving downhill. Two stages address that, and **the trained network stays in
+the loop in both** — in the role it can honestly fill.
+
+### Stage A — catchment mass balance and pumping
+
+`rainshield/hydro/` answers the operational question directly, per catchment:
+
+```
+inflow  = (rainfall − infiltration) × area            [m³/s]
+supply  = tide-gated gravity outfall + installed pumps
+deficit = inflow − supply  →  N more pumps of 6 m³/s
+```
+
+It is additive: nothing here feeds back into `hazard.py`, so it changes no
+number already on the board. `GET /api/drainage` serves it and the **Drainage**
+tab renders it.
+
+**The seven real BRIMSTOWAD stations** are modelled at their real locations —
+Haji Ali, Love Grove, Cleveland Bunder, Britannia, Gazdhar Bandh, Irla and
+Mogra, 180 m³/s installed. Capacities are **estimates**, assembled from public
+reporting of pump counts at a nominal 6 m³/s per unit, and every one carries a
+`capacityBasis` string the API serves and the dashboard prints. Outfall invert
+levels are a weaker estimate still, and say so.
+
+**Tide gating is the mechanism, not a detail.** Mumbai's gravity outfalls shut
+when the sea rises above their inverts, and both 2005 and 2017 were extreme rain
+on a high tide. A four-constituent harmonic model (M2, S2, K1, O1) gives the
+spring–neap cycle and the diurnal inequality — a 4.6 m spring range over a
+30-day span of 0.12–4.97 m above chart datum, the right character for Apollo
+Bandar. The answer genuinely flips:
+
+| Rainfall | Low water | High water |
+| --- | --- | --- |
+| 25 mm/hr | sufficient | sufficient |
+| 50 mm/hr (design standard) | sufficient | **3 of 7 catchments short** |
+| 100 mm/hr | 3 of 7 short | **7 of 7 short, +30 pumps** |
+
+Supply collapses from 320 to 180 m³/s as the gates shut. The tide slider on the
+Drainage tab pins sea level, so this is one drag away.
+
+> **Why the pumped service areas are design-derived.** Working back from
+> installed capacity at BRIMSTOWAD's 50 mm/hr standard, these stations were
+> built for catchments of 1.3–2.6 km². One cell of this grid is 0.94 km² — an
+> engineered catchment is *smaller than the model's resolution*. Asked for
+> topographic catchments within 1 km of each station, D8 returns nothing;
+> relaxed to 4.5 km it returns basins 5–25× too large, because Mumbai has on the
+> order of a hundred outfalls and only seven are pumped, so attributing a
+> coastal stretch to one station hands it every other outfall's water. That
+> produced a headline of 3,194 extra pumps.
+>
+> So terrain decides *which* cells — a cell is eligible only if its own flow path
+> reaches the coast near that station — and the design standard decides *how
+> many*. One consequence bounds what the model can conclude: because service
+> areas are derived from capacity, every station is by construction sized for its
+> own design standard. This cannot discover that a station is under-built for
+> what it was designed for. It can say whether rain exceeds the standard, and how
+> much of the margin the tide takes.
+
+Land outside those areas is reported with its inflow and **no capacity figure at
+all**, rather than a deficit against a capacity that was never modelled.
+
+### Stage B — distributed routing
+
+`RAINSHIELD_SOLVER=physics` replaces the hazard heuristic with a mass-conserving
+finite-volume diffusive-wave solver:
+
+```
+∂h/∂t + ∇·q = R − I − P − D
+q = −(1/n) · h^(5/3) · ∇(z+h) / |∇(z+h)|^(1/2)
+```
+
+Fluxes are computed on cell faces and applied with opposite signs to the two
+cells sharing a face, so water removed from one is exactly the water added to
+the other. **Mass conservation is a property of the discretisation, not a
+penalty term.** The coast is an **open boundary, tide-gated**: land cells
+adjacent to the sea discharge over a weir driven by head over sea level, and the
+flap gate shuts rather than reversing when the sea is higher. A no-flux coast
+would pond water against the shoreline exactly where the city drains.
+
+One solve gives every lead time from a single trajectory, so "+3 hr" is genuinely
+the state "+1 hr" evolved into — and water can *recede* when the rain stops,
+which a per-lead response curve cannot represent. A full 6-hour solve is ~160 ms.
+
+**Where the network sits.** The solver needs two parameters it cannot measure at
+1 km, neither of which is in any raster the project has:
+
+```
+depression storage   d = d_min + (d_max − d_min)·s    where water ponds before routing
+drain removal rate   k = k_max·(1 − s)                how badly the drains cope
+```
+
+`s` is the network's susceptibility — a dimensionless 0–1 statement about where
+water collects and lingers, which is exactly what it genuinely learned. Manning's
+n comes from built density instead, because roughness is a physical property the
+terrain layers already describe. **Depth is never read from the network**; it
+comes from conservation of mass over terrain. This is also the socket that gets
+retrained when observed inundation exists, and nothing else has to change.
+
+### Mass closure instead of a PDE residual
+
+The solve tallies every volume that entered or left and reports the closure
+error — the governing equation integrated over the whole domain and the whole
+run. It comes out at **~3 × 10⁻¹⁵**, machine precision, and the **Hazard model**
+panel on the Risk tab prints it with the volumes behind it. That is a checkable
+claim, unlike "physics-informed".
+
+### No strict PINN, deliberately
+
+A residual-loss PINN has to be *trained*, and the Stage 0 target is
+`elevation ≤ 12 AND slope ≤ 1.5` on a single grid at one timestep — with both as
+input channels. There is nothing to train a residual against. A hard-constrained
+solver is strictly stronger anyway: mass conservation exact by construction beats
+mass conservation approximately penalised.
+
+### What this is not
+
+1 km is **catchment scale, not street scale**. Real BRIMSTOWAD hydraulic
+modelling runs at 10–30 m on the surveyed drain layout. Nothing here supports a
+claim about street-level inundation. Manning's n, infiltration rates, pump
+capacities, outfall inverts, the depression-storage range and the tidal phases
+are all **uncalibrated estimates**. The model is *defensible* — it conserves
+mass, and responds to terrain, tide and pumping the way the real system does —
+but it is **not validated** against a gauged flood.
 
 ## Live data
 
@@ -294,6 +432,7 @@ source is still live data.
 | `GET /api/observation` | the current observation field by field, with timestamps |
 | `GET /api/forecast?lead=` | scored grid at one lead time + region and ward roll-ups |
 | `GET /api/series` | region-wide trend across every lead time |
+| `GET /api/drainage` | catchment mass balance, pumping capacity and tide state |
 | `GET /api/cell/{row}/{col}` | one cell across every lead time |
 | `POST /api/refresh` | drop the cached observation and re-pull |
 
@@ -320,6 +459,7 @@ GeoJSON features per refresh. Interactive docs at `/docs`.
 | `RAINSHIELD_CORS_ORIGINS` | `*` | comma-separated allowed origins |
 | `RAINSHIELD_PROCESSED_DIR` | `./processed_data` | weights and Stage 1 tensor |
 | `RAINSHIELD_FORCE_ANALYTICAL` | unset | skip the network, use the analytical fallback |
+| `RAINSHIELD_SOLVER` | `heuristic` | hazard path. `physics` routes water with the mass-conserving solver; it moves every number on the board, so it is opt-in |
 | `VITE_API_BASE` | same-origin | backend URL, **inlined at build time** |
 | `VITE_BASEMAP_KEY` | — | CARTO key; tiles watermark without one |
 
@@ -355,6 +495,25 @@ Without `VITE_API_BASE` the client calls its own origin, which on Vercel means
 On Render's free tier the API sleeps after inactivity, so the first request
 after a sleep pays a cold start of roughly a minute.
 
+> **The blueprint is not what Render is running.** The `rainshield-api` service
+> was created by hand rather than from `render.yaml`, so Render never reads this
+> file: it was pinned to branch `sneha` with no health check path while the
+> blueprint claimed `main` and `/health`. `sneha` stopped receiving commits at
+> PR #7, so the deployed API predated `/api/regions` and `/api/observation` — a
+> current dashboard calling a four-merge-old backend, which is why the region
+> switcher and the Live feed tab vanished without any error on the board
+> (`useDashboard` swallows the region-list failure by design). Editing
+> `render.yaml` does not move the deploy; the branch must be changed in
+> Render → Settings → Build & Deploy, or the service adopted into the blueprint.
+
+**Frontend (Vercel).** For the record, Vercel was never the problem: the project
+builds with the `vite` preset from `main`, and every merge to `main` has produced
+a READY production deployment. When the board looks stale, check which commit
+*Render* is on before suspecting the bundle. `vercel.json` now pins the preset,
+install and build commands and the output directory so the build is reproducible
+from the repo rather than from dashboard settings — the same reasoning that puts
+`VITE_API_BASE` in `.env.production`.
+
 ### Why the first load used to take minutes
 
 Four things compounded, and all four are fixed:
@@ -388,6 +547,9 @@ cd backend
 pip install -r requirements-dev.txt
 pytest tests/ -q
 ```
+
+Both hazard paths are covered: the suite passes with `RAINSHIELD_SOLVER`
+unset and with it set to `physics`.
 
 Covers the torch-free checkpoint reader against `torch.load`, the NumPy forward
 pass against PyTorch, Open-Meteo and MET Norway parsing (including null handling

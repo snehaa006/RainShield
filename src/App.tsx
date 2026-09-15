@@ -6,13 +6,22 @@ import { DashboardProvider, useDashboard } from '@/hooks/useDashboard';
 import { Header } from '@/components/layout/Header';
 import { SimulatedBanner } from '@/components/layout/SimulatedBanner';
 import { StatusBar } from '@/components/layout/StatusBar';
-import { AlertsView, DashboardView, FeedView, MapView, RiskView, WardsView } from '@/views';
+import {
+  AlertsView,
+  DashboardView,
+  DrainageView,
+  FeedView,
+  MapView,
+  RiskView,
+  WardsView,
+} from '@/views';
 import type { ViewId } from '@/views';
 
 const VIEW_COMPONENTS: Record<ViewId, () => JSX.Element> = {
   dashboard: DashboardView,
   map: MapView,
   risk: RiskView,
+  drainage: DrainageView,
   wards: WardsView,
   alerts: AlertsView,
   feed: FeedView,

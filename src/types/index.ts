@@ -233,3 +233,98 @@ export interface CapAlert {
 
 /** The metric the map's grid layer is coloured by. */
 export type LayerId = 'rainfall' | 'flood' | 'risk';
+
+/** A pumping station, with the provenance of its capacity figure attached. */
+export interface PumpStationInfo {
+  id: string;
+  name: string;
+  lon: number;
+  lat: number;
+  pumps: number;
+  capacityCumecs: number;
+  unitCumecs: number;
+  gravityCumecs: number;
+  /** Outfall invert level, m above chart datum. The gate shuts above this. */
+  outfallInvertMCd: number;
+  commissioned: number | null;
+  /**
+   * Where the capacity figure comes from. Travels with every capacity the API
+   * serves, because a number that arrives without its caveat is a number that
+   * will eventually be quoted as fact.
+   */
+  capacityBasis: string;
+  generated: boolean;
+}
+
+/** One catchment's mass balance at one lead time. */
+export interface CatchmentBalance {
+  id: string;
+  name: string;
+  stationId: string | null;
+  areaKm2: number;
+  cellCount: number;
+  rainfallMmHr: number;
+  infiltrationMmHr: number;
+  netRunoffMmHr: number;
+  /** Rainfall intensity the current supply can clear, mm/hr. */
+  capacityMmHr: number;
+  /** The same with the tide gate open. */
+  openGateCapacityMmHr: number;
+  inflowCumecs: number;
+  gravityCumecs: number;
+  pumpCumecs: number;
+  supplyCumecs: number;
+  deficitCumecs: number;
+  extraPumpsRequired: number;
+  sufficient: boolean;
+  gateClosed: boolean;
+  /** False for the unpumped remainder, which claims no capacity at all. */
+  supplyModelled: boolean;
+}
+
+/** Sea level and how it is moving, m above chart datum. */
+export interface TideState {
+  levelMCd: number;
+  rateMPerHr: number;
+  /** Where this sits between LAT (0) and HAT (1). */
+  normalised: number;
+  phase: 'high' | 'low' | 'flooding' | 'ebbing';
+  rising: boolean;
+  validAt: string;
+  meanSeaLevelMCd: number;
+  highestAstronomicalMCd: number;
+  lowestAstronomicalMCd: number;
+  springRangeM: number;
+  basis: string;
+}
+
+/**
+ * Which hazard path produced the numbers, and how well it closed.
+ *
+ * The mass-balance figure is the checkable version of a PDE residual: the
+ * governing equation integrated over the whole domain and the whole run. The
+ * heuristic path reports none, because nothing about it is conserved — which
+ * is the point, so it is stated rather than omitted.
+ */
+export interface SolverStatus {
+  mode: 'heuristic' | 'physics';
+  label: string;
+  massConserving: boolean;
+  note: string;
+  massClosure: {
+    /** Residual as a fraction of everything that entered the domain. */
+    error: number;
+    residualM3: number;
+    rainfallM3: number;
+    toSeaM3: number;
+    pumpedM3: number;
+    drainedM3: number;
+    infiltratedM3: number;
+    offDomainM3: number;
+    storedM3: number;
+  } | null;
+  steps?: number;
+  elapsedMs?: number;
+  tideMCd?: number;
+  notes?: string[];
+}
