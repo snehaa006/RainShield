@@ -53,12 +53,12 @@ log = logging.getLogger("rainshield")
 def _warm_cache() -> None:
     """Pull and score the first observation for every region, in the background.
 
-    Fetching alone was not enough, and the docstring used to claim otherwise.
-    A visitor arriving after a refresh still paid all seven forward passes —
-    one for the forecast and six for the series — which is ~7.5 CPU-seconds,
-    or the better part of a minute on an instance capped at 0.15 of a core.
-    Scoring now happens here too, and on every later observation via the
-    subscription below, so the request path finds it done.
+    Fetching alone was not enough, and the docstring used to claim otherwise:
+    a visitor arriving after a refresh still paid all seven forward passes —
+    one for the forecast and six for the series, ~7.5 CPU-seconds, the better
+    part of a minute on an instance capped at 0.15 of a core. Landing an
+    observation now queues it for scoring on the scorer thread, so the request
+    path finds the work done without the fetch ever waiting for it.
 
     Runs off the startup path so a slow or unreachable feed cannot hold up (or
     fail) the deploy.
@@ -66,7 +66,6 @@ def _warm_cache() -> None:
     for region in region_ids():
         try:
             observation = get_observation(region_id=region)
-            precompute(observation)
             log.info(
                 "warm-up observation [%s]: source=%s degraded=%s simulated=%s notes=%s",
                 region,
@@ -79,16 +78,58 @@ def _warm_cache() -> None:
             log.warning("warm-up fetch for %s failed: %s: %s", region, type(exc).__name__, exc)
 
 
+#: Observations waiting to be scored, newest per region. Scoring happens on
+#: one dedicated thread so that it can never run on the feed's thread — see
+#: `_score_arrival` — and so that two regions landing together cannot fight
+#: each other for a CPU allowance this small.
+_pending: dict[str, object] = {}
+_pending_lock = threading.Lock()
+_pending_ready = threading.Event()
+
+
 def _score_arrival(observation) -> None:
-    """Precompute the scored grid for an observation that has just landed."""
-    started = time.perf_counter()
-    precompute(observation)
-    log.info(
-        "scored [%s] %s in %.2fs — request path stays warm",
-        observation.region_id,
-        observation.source,
-        time.perf_counter() - started,
-    )
+    """Queue a freshly-landed observation for scoring, and return immediately.
+
+    Returning immediately is the whole contract. Subscribers run inside
+    `_record`, which runs inside the provider chain, which runs *before* the
+    gate that unblocks every request waiting for that refresh. Scoring an
+    observation is about 7.5 CPU-seconds, so doing it here directly held that
+    gate shut for the better part of a minute per region and the board sat on
+    "Loading live forecast" until it gave up — which is exactly what it did.
+
+    Only the newest observation per region is kept: if a second lands while the
+    first is still being scored, scoring the older one is wasted work.
+    """
+    with _pending_lock:
+        _pending[observation.region_id] = observation
+    _pending_ready.set()
+
+
+def _scorer() -> None:
+    """Score queued observations, one at a time, forever."""
+    while True:
+        _pending_ready.wait()
+        with _pending_lock:
+            batch = list(_pending.values())
+            _pending.clear()
+            _pending_ready.clear()
+        for observation in batch:
+            try:
+                started = time.perf_counter()
+                precompute(observation)
+                log.info(
+                    "scored [%s] %s in %.1fs — request path stays warm",
+                    observation.region_id,
+                    observation.source,
+                    time.perf_counter() - started,
+                )
+            except Exception as exc:  # noqa: BLE001 — scoring must never die
+                log.warning(
+                    "scoring [%s] failed: %s: %s",
+                    observation.region_id,
+                    type(exc).__name__,
+                    exc,
+                )
 
 
 @asynccontextmanager
@@ -101,6 +142,7 @@ async def lifespan(_app: FastAPI):
     # Score every observation as it lands, not when it is first asked for.
     # The feed clock is already fetching on cadence with nobody waiting on it,
     # so the inference rides along and the request path stays cheap.
+    threading.Thread(target=_scorer, name="scorer", daemon=True).start()
     on_observation(_score_arrival)
     threading.Thread(target=_warm_cache, name="warm-cache", daemon=True).start()
     # Keep every region's feed arriving on its own cadence, so a dashboard that

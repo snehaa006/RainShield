@@ -339,11 +339,16 @@ def test_precompute_leaves_no_model_call_for_the_request(monkeypatch):
     """The point of it: a scored observation makes the request path cheap.
 
     Asserted by counting forward passes rather than by timing, because a
-    timing ratio is both flaky and order-dependent — the feed clock can score
-    an observation from another thread mid-test and make the "cold" case fast.
-    The count is exact, and it is the quantity that matters: seven passes is
-    about 7.5 CPU-seconds, which on an instance capped at 0.15 of a core is
-    most of a minute landing on whoever loads the page first.
+    timing ratio is both flaky and order-dependent. Seven passes is about
+    7.5 CPU-seconds, which on an instance capped at 0.15 of a core is most of
+    a minute landing on whoever loads the page first.
+
+    The assertion that carries the meaning is the warm one — after a
+    precompute the request must make *no* model call at all. The cold case is
+    only a control, and it is asserted loosely on purpose: scoring now happens
+    on a background thread, so a scorer may legitimately be running alongside
+    and inflate the count. Pinning it exactly would be testing thread
+    scheduling, not behaviour.
     """
     from rainshield import service
     from rainshield.config import LEAD_TIMES
@@ -361,11 +366,13 @@ def test_precompute_leaves_no_model_call_for_the_request(monkeypatch):
 
     observation = get_observation(region_id=PRIMARY_REGION_ID)
 
-    # Cold: the series endpoint scores every lead itself.
+    # Cold: the series endpoint has to score the leads itself.
     service._SUSCEPTIBILITY_CACHE.clear()
     calls.clear()
     service.series_payload(DEFAULT_WHAT_IF, PRIMARY_REGION_ID)
-    assert len(calls) == len(LEAD_TIMES)
+    assert set(calls) >= set(LEAD_TIMES), (
+        f"cold request should have scored every lead, got {sorted(set(calls))}"
+    )
 
     # Warm: precompute has already done it, so the request does none.
     service._SUSCEPTIBILITY_CACHE.clear()
@@ -390,6 +397,52 @@ def test_subscribers_are_notified_when_an_observation_lands():
         clear_cache(PRIMARY_REGION_ID)
         get_observation(region_id=PRIMARY_REGION_ID, force_refresh=True)
         assert PRIMARY_REGION_ID in seen
+    finally:
+        clear_observation_subscribers()
+
+
+def test_a_slow_subscriber_never_delays_the_feed():
+    """The regression that took the deployed board down.
+
+    `_record` runs inside the provider chain, which runs before the gate that
+    releases every request waiting on that refresh. When the scoring subscriber
+    ran inline it held that gate shut for ~7.5 CPU-seconds per region — most of
+    a minute on a 0.15-core instance — and the dashboard sat on "Loading live
+    forecast" until it timed out. Subscribers are dispatched on their own
+    thread so that no subscriber can do that again, however careless.
+    """
+    import time
+
+    from rainshield.ingest import (
+        clear_cache,
+        clear_observation_subscribers,
+        get_observation,
+        on_observation,
+    )
+
+    ran: list[str] = []
+    delay = 3.0
+
+    def slow(observation):
+        time.sleep(delay)
+        ran.append(observation.region_id)
+
+    try:
+        on_observation(slow)
+        clear_cache(PRIMARY_REGION_ID)
+        started = time.perf_counter()
+        get_observation(region_id=PRIMARY_REGION_ID, force_refresh=True)
+        elapsed = time.perf_counter() - started
+
+        assert elapsed < delay / 2, (
+            f"the feed waited {elapsed:.2f}s on a subscriber — it must not"
+        )
+
+        # It still runs; it just runs beside the feed rather than inside it.
+        deadline = time.perf_counter() + delay * 3
+        while not ran and time.perf_counter() < deadline:
+            time.sleep(0.05)
+        assert ran == [PRIMARY_REGION_ID]
     finally:
         clear_observation_subscribers()
 
