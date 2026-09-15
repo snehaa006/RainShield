@@ -144,13 +144,22 @@ class FeedArrival:
     notes: tuple[str, ...] = field(default=())
 
 
-#: Called with every observation that lands, on whichever thread landed it.
+#: Called with every observation that lands.
 #:
-#: The point of the hook is that scoring a new observation is expensive and
-#: has no business being on a visitor's critical path. Subscribers run after
-#: the observation is cached, so anything they precompute is already warm by
-#: the time a request asks for it. Kept as a subscription rather than a direct
-#: call so that `ingest` does not have to import the model layer.
+#: The point of the hook is that scoring a new observation is expensive and has
+#: no business being on a visitor's critical path. Subscribers run after the
+#: observation is cached, so anything they precompute is already warm by the
+#: time a request asks for it. Kept as a subscription rather than a direct call
+#: so that `ingest` does not have to import the model layer.
+#:
+#: Subscribers are dispatched on their own thread, and that is not tidiness —
+#: it is load-bearing. `_record` runs inside the provider chain, which runs
+#: *before* the gate that releases every request waiting on that refresh. The
+#: first version of this hook called subscribers inline, the only subscriber
+#: scored the observation (~7.5 CPU-seconds), and the gate stayed shut for the
+#: better part of a minute per region: the dashboard sat on "Loading live
+#: forecast" until it timed out, and reloading only added contention. No
+#: subscriber, however careful, is allowed to be able to do that again.
 _subscribers: list[Callable[[LiveObservation], None]] = []
 
 
@@ -185,7 +194,19 @@ def _record(observation: LiveObservation) -> None:
         bucket = _feed_log.setdefault(observation.region_id, deque(maxlen=FEED_LOG_LIMIT))
         bucket.append(arrival)
 
-    for callback in list(_subscribers):
+    callbacks = list(_subscribers)
+    if callbacks:
+        threading.Thread(
+            target=_notify,
+            args=(observation, callbacks),
+            name=f"observation-subscribers-{observation.region_id}",
+            daemon=True,
+        ).start()
+
+
+def _notify(observation: LiveObservation, callbacks: list) -> None:
+    """Run subscribers off the feed's thread, one failure at a time."""
+    for callback in callbacks:
         try:
             callback(observation)
         except Exception as exc:  # noqa: BLE001 — a subscriber must never lose the feed
