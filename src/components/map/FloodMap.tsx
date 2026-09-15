@@ -18,6 +18,7 @@ export function FloodMap() {
     region,
     activeLayer,
     showInfrastructure,
+    stations,
     selectedWardId,
     selectCell,
     selectWard,
@@ -210,7 +211,7 @@ export function FloodMap() {
     markersRef.current = [];
     if (!showInfrastructure) return;
 
-    markersRef.current = infrastructureFor(region).map((asset) => {
+    markersRef.current = infrastructureFor(region, stations).map((asset) => {
       const element = document.createElement('div');
       element.className =
         'flex h-5 w-5 items-center justify-center rounded-full border border-slate-300/70 ' +
@@ -219,7 +220,7 @@ export function FloodMap() {
       element.title = `${asset.name} — ${INFRA_LABELS[asset.type]}`;
       return new maplibregl.Marker({ element }).setLngLat([asset.lon, asset.lat]).addTo(map);
     });
-  }, [showInfrastructure, region, ready]);
+  }, [showInfrastructure, region, stations, ready]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }

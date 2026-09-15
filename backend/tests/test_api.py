@@ -188,6 +188,17 @@ def test_drainage_capacity_figures_carry_their_caveat(client):
         assert "ESTIMATE" in station["capacityBasis"]
 
 
+def test_region_serves_the_real_pumping_stations(client):
+    """The map draws these, so they must be the surveyed ones, not invented."""
+    stations = client.get("/api/region").json()["stations"]
+    assert len(stations) == 7
+    names = {s["name"] for s in stations}
+    assert "Haji Ali" in names and "Mogra (Andheri)" in names
+    for station in stations:
+        assert station["generated"] is False
+        assert "ESTIMATE" in station["capacityBasis"]
+
+
 def test_drainage_works_for_the_simulated_region(client):
     body = client.get("/api/drainage?region=coromandel").json()
     assert body["region"]["simulated"] is True

@@ -30,6 +30,7 @@ import type {
   LayerId,
   LeadTime,
   ModelStatus,
+  PumpStationInfo,
   RegionDescriptor,
   ScoredCell,
   StormPhase,
@@ -58,6 +59,8 @@ interface DashboardValue extends DashboardState {
   storm: StormPhase | null;
   /** Static grid, empty until /api/region resolves. */
   grid: GridCellStatic[];
+  /** Pumping stations in the active region. Empty until /api/region resolves. */
+  stations: PumpStationInfo[];
   wards: Ward[];
   cells: ScoredCell[];
   wardSummaries: WardSummary[];
@@ -90,6 +93,9 @@ interface DashboardValue extends DashboardState {
 }
 
 const DashboardContext = createContext<DashboardValue | null>(null);
+
+/** Stable identity, so memoising on `stations` does not rerun every render. */
+const EMPTY_STATIONS: PumpStationInfo[] = [];
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<DashboardState>({
@@ -199,6 +205,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   }, [regionId]);
 
   const grid = useMemo(() => (region ? buildGrid(region) : []), [region]);
+  const stations = region?.stations ?? EMPTY_STATIONS;
   const wards = useMemo(() => (region ? buildWards(region) : []), [region]);
 
   // Join the static grid with the current forecast into the scored cells the
@@ -279,6 +286,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     region: activeRegion,
     storm: forecast?.region.id === regionId ? forecast?.storm ?? null : null,
     grid,
+    stations,
     wards,
     cells,
     wardSummaries,

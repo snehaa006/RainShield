@@ -28,7 +28,7 @@ from rainshield.hazard import (
     compute_hazard,
     confidence_for,
 )
-from rainshield.hydro import assess_drainage, drainage_terrain
+from rainshield.hydro import assess_drainage, drainage_terrain, stations_for
 from rainshield.hydro.stations import PUMP_UNIT_CUMECS
 from rainshield.ingest import cadence_for, feed_log, get_observation, storm_phase
 from rainshield.ingest.base import (
@@ -94,6 +94,10 @@ def region_payload(region_id: str = PRIMARY_REGION_ID) -> dict:
     return {
         "region": region_descriptor(region_id),
         "leadTimes": list(LEAD_TIMES),
+        # Pumping stations are static geography, so they ride along with the
+        # grid rather than forcing the map to fetch an assessment it does not
+        # otherwise need.
+        "stations": [_station_payload(s) for s in stations_for(region_id)],
         "wards": [
             {"id": w.id, "name": w.name, "lon": w.lon, "lat": w.lat}
             for w in wards_for(region_id)

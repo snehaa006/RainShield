@@ -11,21 +11,26 @@
 import { API_BASE } from '@/lib/config';
 import type {
   AlertTier,
+  CatchmentBalance,
   Confidence,
   FeedArrival,
   FeedField,
   FeedStatus,
   LeadTime,
   ModelStatus,
+  PumpStationInfo,
   RegionDescriptor,
   Stamp,
   StormPhase,
+  TideState,
   WhatIfSettings,
 } from '@/types';
 
 export interface RegionPayload {
   region: RegionDescriptor;
   leadTimes: LeadTime[];
+  /** Pumping stations inside the grid. Static geography, so it rides here. */
+  stations: PumpStationInfo[];
   wards: { id: string; name: string; lon: number; lat: number }[];
   cells: {
     lon: number[];
@@ -140,6 +145,41 @@ export interface ObservationPayload {
   };
   arrivals: FeedArrival[];
   servedAt: Stamp;
+}
+
+/** The Stage A drainage assessment at one lead time. */
+export interface DrainagePayload {
+  lead: LeadTime;
+  region: RegionDescriptor;
+  observation: FeedStatus;
+  isSimulating: boolean;
+  tide: TideState;
+  /** True when the tide was pinned rather than predicted. */
+  tideOverridden: boolean;
+  stations: PumpStationInfo[];
+  /** Catchments with a modelled station — the only ones the totals cover. */
+  catchments: CatchmentBalance[];
+  /** Land draining to outfalls the model does not survey. No capacity claimed. */
+  unpumped: CatchmentBalance | null;
+  totals: {
+    inflowCumecs: number;
+    supplyCumecs: number;
+    deficitCumecs: number;
+    extraPumpsRequired: number;
+    installedPumpCumecs: number;
+    catchmentsInDeficit: number;
+    catchmentCount: number;
+    sufficient: boolean;
+    pumpUnitCumecs: number;
+    designIntensityMmHr: number;
+  };
+  cells: {
+    /** Index into `stations`, or -1 where no modelled station drains the cell. */
+    catchment: number[];
+    sea: boolean[];
+  };
+  /** What this model can and cannot be read to say. Rendered, not hidden. */
+  caveat: string;
 }
 
 export interface RegionsPayload {
@@ -270,6 +310,35 @@ export const fetchSeries = (whatIf: WhatIfSettings, region?: string, signal?: Ab
 
 export const fetchObservation = (region?: string, signal?: AbortSignal) =>
   request<ObservationPayload>('/api/observation', regionParam(region), signal);
+
+/**
+ * The drainage assessment.
+ *
+ * `tide` pins sea level in metres above chart datum instead of using the
+ * harmonic prediction — the point of the control being that the answer to
+ * "is there enough pumping capacity" genuinely changes between low and high
+ * water. `pumpAvailability` scales installed capacity, for asking what a
+ * station being down would cost.
+ */
+export const fetchDrainage = (
+  lead: LeadTime,
+  whatIf: WhatIfSettings,
+  region?: string,
+  tide?: number | null,
+  pumpAvailability = 1,
+  signal?: AbortSignal,
+) =>
+  request<DrainagePayload>(
+    '/api/drainage',
+    {
+      lead: String(lead),
+      ...whatIfParams(whatIf),
+      ...regionParam(region),
+      ...(tide == null ? {} : { tide: String(tide) }),
+      ...(pumpAvailability === 1 ? {} : { pump_availability: String(pumpAvailability) }),
+    },
+    signal,
+  );
 
 export const fetchHealth = (signal?: AbortSignal) =>
   request<{ status: string; model: ModelStatus; provider: string; observation: FeedStatus }>(
