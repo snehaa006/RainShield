@@ -313,3 +313,104 @@ def test_a_slow_upstream_serves_the_previous_observation(monkeypatch):
     assert served.fetched_at == good.fetched_at
     assert served.degraded is True
     assert any("upstream slow" in note for note in served.notes)
+
+
+# --------------------------------------------------------------------------
+# Scoring off the request path
+# --------------------------------------------------------------------------
+
+
+def test_precompute_scores_every_lead_time():
+    """After a precompute, no lead time may still need the network."""
+    from rainshield import service
+    from rainshield.config import LEAD_TIMES
+    from rainshield.ingest import get_observation
+
+    service._SUSCEPTIBILITY_CACHE.clear()
+    observation = get_observation(region_id=PRIMARY_REGION_ID)
+    service.precompute(observation)
+
+    stamp = observation.fetched_at.isoformat()
+    for lead in LEAD_TIMES:
+        assert (observation.region_id, stamp, lead) in service._SUSCEPTIBILITY_CACHE
+
+
+def test_precompute_leaves_no_model_call_for_the_request(monkeypatch):
+    """The point of it: a scored observation makes the request path cheap.
+
+    Asserted by counting forward passes rather than by timing, because a
+    timing ratio is both flaky and order-dependent — the feed clock can score
+    an observation from another thread mid-test and make the "cold" case fast.
+    The count is exact, and it is the quantity that matters: seven passes is
+    about 7.5 CPU-seconds, which on an instance capped at 0.15 of a core is
+    most of a minute landing on whoever loads the page first.
+    """
+    from rainshield import service
+    from rainshield.config import LEAD_TIMES
+    from rainshield.hazard import DEFAULT_WHAT_IF
+    from rainshield.ingest import get_observation
+
+    calls: list[int] = []
+    real = service.predict_susceptibility
+
+    def counted(observation, lead, region_id):
+        calls.append(lead)
+        return real(observation, lead, region_id)
+
+    monkeypatch.setattr(service, "predict_susceptibility", counted)
+
+    observation = get_observation(region_id=PRIMARY_REGION_ID)
+
+    # Cold: the series endpoint scores every lead itself.
+    service._SUSCEPTIBILITY_CACHE.clear()
+    calls.clear()
+    service.series_payload(DEFAULT_WHAT_IF, PRIMARY_REGION_ID)
+    assert len(calls) == len(LEAD_TIMES)
+
+    # Warm: precompute has already done it, so the request does none.
+    service._SUSCEPTIBILITY_CACHE.clear()
+    service.precompute(observation)
+    calls.clear()
+    service.series_payload(DEFAULT_WHAT_IF, PRIMARY_REGION_ID)
+    assert calls == [], f"request still ran the network for leads {calls}"
+
+
+def test_subscribers_are_notified_when_an_observation_lands():
+    """The hook the scoring rides on must actually fire."""
+    from rainshield.ingest import (
+        clear_cache,
+        clear_observation_subscribers,
+        get_observation,
+        on_observation,
+    )
+
+    seen: list[str] = []
+    try:
+        on_observation(lambda obs: seen.append(obs.region_id))
+        clear_cache(PRIMARY_REGION_ID)
+        get_observation(region_id=PRIMARY_REGION_ID, force_refresh=True)
+        assert PRIMARY_REGION_ID in seen
+    finally:
+        clear_observation_subscribers()
+
+
+def test_a_failing_subscriber_never_costs_the_feed_an_observation():
+    """A precompute that blows up must not take the arrival down with it."""
+    from rainshield.ingest import (
+        clear_cache,
+        clear_observation_subscribers,
+        get_observation,
+        on_observation,
+    )
+
+    def explode(_observation):
+        raise RuntimeError("scoring failed")
+
+    try:
+        on_observation(explode)
+        clear_cache(PRIMARY_REGION_ID)
+        observation = get_observation(region_id=PRIMARY_REGION_ID, force_refresh=True)
+        assert observation is not None
+        assert observation.region_id == PRIMARY_REGION_ID
+    finally:
+        clear_observation_subscribers()

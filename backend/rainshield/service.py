@@ -218,6 +218,31 @@ def _physics_hazard(
     )
 
 
+def precompute(observation: LiveObservation) -> None:
+    """Score a freshly-landed observation at every lead time, off the request path.
+
+    This is the difference between a usable board and an unusable one on a
+    small instance, and the numbers are stark. Scoring one observation costs
+    about 7.5 CPU-seconds — one forward pass for `/api/forecast` and six more
+    for `/api/series`, which the dashboard requests together. On Render's free
+    tier, which caps the service at 0.15 of a core, that is close to fifty
+    seconds of wall time, and it was landing on whoever happened to load the
+    page first after each ten-minute refresh.
+
+    None of that work depends on the request. The feed clock already fetches
+    every observation on its own cadence, so the scoring can ride along with
+    it and be finished before anyone asks. A request then finds the cache warm
+    and costs a few hundredths of a second.
+
+    Errors are swallowed by the caller: a failed precompute must never cost the
+    feed an observation, and the request path will simply do the work itself.
+    """
+    for lead in LEAD_TIMES:
+        _susceptibility_for(observation, lead)
+    if SETTINGS.use_physics_solver:
+        _solve_for(observation, DEFAULT_WHAT_IF)
+
+
 def _hazard_for(observation: LiveObservation, lead: int, what_if: WhatIf) -> HazardField:
     if SETTINGS.use_physics_solver:
         return _physics_hazard(observation, lead, what_if)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 import threading
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
@@ -16,6 +17,7 @@ from rainshield.hazard import WhatIf
 from rainshield.ingest import (
     clear_cache,
     get_observation,
+    on_observation,
     simulated_cadence,
     start_feed_clock,
     stop_feed_clock,
@@ -23,6 +25,7 @@ from rainshield.ingest import (
 from rainshield.models.predictor import model_status
 from rainshield.regions import PRIMARY_REGION_ID, get_region, region_ids
 from rainshield.service import (
+    precompute,
     cell_series_payload,
     drainage_payload,
     forecast_payload,
@@ -48,16 +51,22 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("rainshield")
 
 def _warm_cache() -> None:
-    """Pull the first observation for every region in the background.
+    """Pull and score the first observation for every region, in the background.
 
-    Without this the first visitor pays the upstream round trip plus the first
-    inference, which on a sleeping free-tier instance lands on top of an already
-    slow cold start. Runs off the startup path so a slow or unreachable feed
-    cannot hold up (or fail) the deploy.
+    Fetching alone was not enough, and the docstring used to claim otherwise.
+    A visitor arriving after a refresh still paid all seven forward passes —
+    one for the forecast and six for the series — which is ~7.5 CPU-seconds,
+    or the better part of a minute on an instance capped at 0.15 of a core.
+    Scoring now happens here too, and on every later observation via the
+    subscription below, so the request path finds it done.
+
+    Runs off the startup path so a slow or unreachable feed cannot hold up (or
+    fail) the deploy.
     """
     for region in region_ids():
         try:
             observation = get_observation(region_id=region)
+            precompute(observation)
             log.info(
                 "warm-up observation [%s]: source=%s degraded=%s simulated=%s notes=%s",
                 region,
@@ -70,6 +79,18 @@ def _warm_cache() -> None:
             log.warning("warm-up fetch for %s failed: %s: %s", region, type(exc).__name__, exc)
 
 
+def _score_arrival(observation) -> None:
+    """Precompute the scored grid for an observation that has just landed."""
+    started = time.perf_counter()
+    precompute(observation)
+    log.info(
+        "scored [%s] %s in %.2fs — request path stays warm",
+        observation.region_id,
+        observation.source,
+        time.perf_counter() - started,
+    )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Load weights and static layers at boot so the first request is fast."""
@@ -77,6 +98,10 @@ async def lifespan(_app: FastAPI):
     log.info("model backend=%s runtime=%s loaded=%s", status["backend"], status["runtime"], status["loaded"])
     if status["error"]:
         log.warning("model load issue: %s", status["error"])
+    # Score every observation as it lands, not when it is first asked for.
+    # The feed clock is already fetching on cadence with nobody waiting on it,
+    # so the inference rides along and the request path stays cheap.
+    on_observation(_score_arrival)
     threading.Thread(target=_warm_cache, name="warm-cache", daemon=True).start()
     # Keep every region's feed arriving on its own cadence, so a dashboard that
     # is merely open still sees new data land.

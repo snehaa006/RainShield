@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from typing import Callable
 import time
 from collections import deque
 from dataclasses import dataclass, field
@@ -143,6 +144,26 @@ class FeedArrival:
     notes: tuple[str, ...] = field(default=())
 
 
+#: Called with every observation that lands, on whichever thread landed it.
+#:
+#: The point of the hook is that scoring a new observation is expensive and
+#: has no business being on a visitor's critical path. Subscribers run after
+#: the observation is cached, so anything they precompute is already warm by
+#: the time a request asks for it. Kept as a subscription rather than a direct
+#: call so that `ingest` does not have to import the model layer.
+_subscribers: list[Callable[[LiveObservation], None]] = []
+
+
+def on_observation(callback: Callable[[LiveObservation], None]) -> None:
+    """Run `callback` whenever a new observation is cached."""
+    if callback not in _subscribers:
+        _subscribers.append(callback)
+
+
+def clear_observation_subscribers() -> None:
+    _subscribers.clear()
+
+
 def _record(observation: LiveObservation) -> None:
     """Append an arrival to the region's log, newest last."""
     rate, accum = observation.rain_rate[0], observation.rain_3h[0]
@@ -163,6 +184,17 @@ def _record(observation: LiveObservation) -> None:
     with _lock:
         bucket = _feed_log.setdefault(observation.region_id, deque(maxlen=FEED_LOG_LIMIT))
         bucket.append(arrival)
+
+    for callback in list(_subscribers):
+        try:
+            callback(observation)
+        except Exception as exc:  # noqa: BLE001 — a subscriber must never lose the feed
+            log.warning(
+                "observation subscriber %s failed: %s: %s",
+                getattr(callback, "__name__", callback),
+                type(exc).__name__,
+                exc,
+            )
 
 
 def feed_log(region_id: str = PRIMARY_REGION_ID) -> list[FeedArrival]:
