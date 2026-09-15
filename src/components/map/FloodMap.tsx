@@ -202,6 +202,17 @@ export function FloodMap() {
     });
   }, [ready, wards, selectedWardId]);
 
+  // A critical event selects its ward automatically. Move the camera there so
+  // the operator immediately sees the affected geography rather than having to
+  // find it manually. User panning/zooming is still respected afterwards.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !selectedWardId) return;
+    const ward = wards.find((item) => item.id === selectedWardId);
+    if (!ward) return;
+    map.flyTo({ center: ward.centre, zoom: Math.max(map.getZoom(), 11.9), duration: 850 });
+  }, [ready, selectedWardId]);
+
   // Infrastructure overlay as DOM markers — few enough that symbols are overkill.
   useEffect(() => {
     const map = mapRef.current;

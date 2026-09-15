@@ -233,3 +233,80 @@ export interface CapAlert {
 
 /** The metric the map's grid layer is coloured by. */
 export type LayerId = 'rainfall' | 'flood' | 'risk';
+
+
+export type AlertLifecycle =
+  | 'DRAFT'
+  | 'UNDER_REVIEW'
+  | 'APPROVED'
+  | 'BROADCASTING'
+  | 'ACTIVE'
+  | 'RESOLVED'
+  | 'CANCELLED';
+
+export type AlertChannel = 'SMS' | 'MOBILE_APP' | 'WEB' | 'AUTHORITY_API' | 'SIREN';
+
+export interface AlertDelivery {
+  targeted: number;
+  delivered: number;
+  pending: number;
+  rate: number;
+  status: 'READY' | 'SIMULATED';
+}
+
+export interface AlertRecord {
+  id: string;
+  status: AlertLifecycle;
+  createdAt: string;
+  updatedAt: string;
+  actor: string;
+  region: {
+    id: string;
+    name: string;
+    state: string;
+    simulated: boolean;
+  };
+  lead: number;
+  tier: AlertTier;
+  ward: WardRollupLike;
+  metrics: {
+    risk: number;
+    floodProbability: number;
+    waterDepth: number;
+    timeToInundation: number | null;
+    populationAtRisk: number;
+    confidence: Confidence;
+  };
+  recommendation: string;
+  approval: {
+    approved: boolean;
+    approvedAt: string | null;
+    approvedBy: string | null;
+  };
+  delivery: Record<AlertChannel, AlertDelivery>;
+  cap: CapAlert;
+  capXml: string;
+}
+
+export interface WardRollupLike {
+  id: string;
+  name: string;
+  tier: AlertTier;
+  risk: number;
+  peakFloodProbability: number;
+  peakWaterDepth: number;
+  timeToInundation: number | null;
+  confidence: Confidence;
+  populationAtRisk: number;
+  cellCount: number;
+  floodedCellCount: number;
+}
+
+export interface AlertAuditEntry {
+  id: string;
+  alertId: string;
+  timestamp: string;
+  action: string;
+  actor: string;
+  detail: string;
+}

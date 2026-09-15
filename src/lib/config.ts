@@ -35,7 +35,7 @@ function normaliseApiBase(raw: string | undefined): string {
 }
 
 /** How often the dashboard re-pulls the forecast, ms. */
-export const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+export const REFRESH_INTERVAL_MS = 60 * 1000;
 
 /** Risk weights from the system architecture spec. Tunable against past events. */
 export const RISK_WEIGHTS = {
