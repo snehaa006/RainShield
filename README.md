@@ -249,7 +249,14 @@ architecture one.
 
 `models/checkpoint.py` reads a `.pth` into NumPy arrays without importing torch
 (bit-identical to `torch.load`), and `models/numpy_backend.py` runs the forward
-pass in NumPy alone, matching torch to ~2 × 10⁻⁶. For a 175k-parameter model on
+pass in NumPy alone, matching torch to ~2 × 10⁻⁶. Attention is computed a block
+of query rows at a time: the 45 × 39 grid is a 1755-token sequence, so a full
+score matrix is 1755 × 1755, and materialising it three layers deep peaked at
+~104 MB per forward pass — enough to get the worker OOM-killed on Render's
+512 MB free instance while `/api/forecast` and `/api/series` ran together.
+Softmax is independent per row, so blocking is **bit-identical**, and it is
+also faster because the blocks fit in cache: peak allocation drops to 12.8 MB
+and a forward pass from 0.46 s to 0.29 s. For a 175k-parameter model on
 one 45 × 39 grid, torch bought nothing and cost a ~2.5 GB dependency and a slow
 cold start. Torch is still needed to *train* — see `requirements-dev.txt`, which
 also runs the equivalence test.
