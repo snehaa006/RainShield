@@ -7,6 +7,15 @@
 #
 # The commands run from the repository root rather than using rootDir, so that
 # the committed weights and rasters under processed_data/ stay on the path.
+#
+# NOTE: the deployed rainshield-api service was created by hand, not from this
+# blueprint, so Render does NOT read this file — it reported branch "sneha" and
+# an empty health check path while the lines below said otherwise. That drift is
+# what served a four-merge-old API to a current dashboard: "sneha" stopped at
+# PR #7, so /api/regions and /api/observation 404'd and the board silently lost
+# its region switcher and Live feed tab. Changing this file alone fixes nothing;
+# the branch has to be repointed in the Render dashboard as well. Keep the two
+# in step, or adopt the service into the blueprint so this file is authoritative.
 
 services:
   - type: web
@@ -14,7 +23,7 @@ services:
     runtime: python
     plan: free
     region: singapore          # closest Render region to the Mumbai study area
-    branch: sneha
+    branch: main
     buildCommand: pip install -r backend/requirements.txt
     startCommand: uvicorn rainshield.api.app:app --app-dir backend --host 0.0.0.0 --port $PORT
     healthCheckPath: /health

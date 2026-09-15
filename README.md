@@ -355,6 +355,25 @@ Without `VITE_API_BASE` the client calls its own origin, which on Vercel means
 On Render's free tier the API sleeps after inactivity, so the first request
 after a sleep pays a cold start of roughly a minute.
 
+> **The blueprint is not what Render is running.** The `rainshield-api` service
+> was created by hand rather than from `render.yaml`, so Render never reads this
+> file: it was pinned to branch `sneha` with no health check path while the
+> blueprint claimed `main` and `/health`. `sneha` stopped receiving commits at
+> PR #7, so the deployed API predated `/api/regions` and `/api/observation` — a
+> current dashboard calling a four-merge-old backend, which is why the region
+> switcher and the Live feed tab vanished without any error on the board
+> (`useDashboard` swallows the region-list failure by design). Editing
+> `render.yaml` does not move the deploy; the branch must be changed in
+> Render → Settings → Build & Deploy, or the service adopted into the blueprint.
+
+**Frontend (Vercel).** For the record, Vercel was never the problem: the project
+builds with the `vite` preset from `main`, and every merge to `main` has produced
+a READY production deployment. When the board looks stale, check which commit
+*Render* is on before suspecting the bundle. `vercel.json` now pins the preset,
+install and build commands and the output directory so the build is reproducible
+from the repo rather than from dashboard settings — the same reasoning that puts
+`VITE_API_BASE` in `.env.production`.
+
 ### Why the first load used to take minutes
 
 Four things compounded, and all four are fixed:
