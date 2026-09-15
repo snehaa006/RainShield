@@ -26,6 +26,9 @@ export function FloodMap() {
   const mapRef = useRef<MapLibreMap | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
   const labelsRef = useRef<maplibregl.Marker[]>([]);
+  // True once the user has driven the camera themselves, after which a resize
+  // must not reset their view.
+  const userMovedRef = useRef(false);
   // `ready` is state rather than a ref because the data effects below have to
   // re-run once the style finishes loading: cells and wards now arrive from the
   // API and routinely beat the map to it.
@@ -38,23 +41,61 @@ export function FloodMap() {
   // The map cannot be created until the region is known — its centre, extent
   // and pan limits all come from it, and they differ per region.
   useEffect(() => {
-    if (!containerRef.current || !region) return undefined;
+    const container = containerRef.current;
+    if (!container || !region) return undefined;
 
     const map = new maplibregl.Map({
-      container: containerRef.current,
+      container,
       style: BASE_STYLE,
       center: region.centre,
       zoom: 10.4,
-      maxBounds: expand(region.bounds, 0.35),
+      maxBounds: expand(region.bounds, 0.6),
       attributionControl: { compact: true },
     });
     mapRef.current = map;
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
     map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left');
 
-    // Fill the panel with the region rather than sitting at a fixed zoom, so a
-    // wide container shows a correspondingly larger grid.
-    map.fitBounds(region.bounds, { padding: 32, duration: 0 });
+    /**
+     * Fit the region to whatever size the panel actually is.
+     *
+     * MapLibre measures its container when it is constructed. In a flex/grid
+     * board that size is not final yet — often it is zero — so fitting straight
+     * away computed a camera for a viewport that never existed, and the grid
+     * ended up small and jammed against one edge of a much wider canvas. It
+     * never recovered, because nothing told the map the container had grown.
+     */
+    const fit = () => {
+      const { clientWidth, clientHeight } = container;
+      if (clientWidth < 1 || clientHeight < 1) return;
+      // Drop the floor from the previous fit first. Keeping it meant a panel
+      // that got *smaller* could not zoom out far enough to show the whole
+      // region again, and silently cropped its north and south edges instead.
+      map.setMinZoom(0);
+      map.resize();
+      map.fitBounds(region.bounds, { padding: 24, duration: 0 });
+      // The fitted view is now the zoomed-out limit, so panning cannot wander
+      // off the region and the zoom control has a sensible bottom stop.
+      map.setMinZoom(map.getZoom() - 0.4);
+    };
+
+    // Re-fit while the user has not taken control of the camera; once they pan
+    // or zoom themselves, a resize should keep their view, not yank it back.
+    const observer = new ResizeObserver(() => {
+      if (userMovedRef.current) map.resize();
+      else fit();
+    });
+    observer.observe(container);
+
+    const markUserMoved = (event: { originalEvent?: unknown }) => {
+      if (event.originalEvent) userMovedRef.current = true;
+    };
+    map.on('dragstart', markUserMoved);
+    map.on('zoomstart', markUserMoved);
+    map.on('rotatestart', markUserMoved);
+
+    userMovedRef.current = false;
+    fit();
 
     map.on('load', () => {
       map.addSource(GRID_SOURCE, { type: 'geojson', data: emptyCollection() });
@@ -110,6 +151,7 @@ export function FloodMap() {
 
     return () => {
       setReady(false);
+      observer.disconnect();
       markersRef.current.forEach((marker) => marker.remove());
       markersRef.current = [];
       labelsRef.current.forEach((marker) => marker.remove());
@@ -230,9 +272,19 @@ const emptyCollection = (): GeoJSON.FeatureCollection => ({
   features: [],
 });
 
+/**
+ * Pan limits around a region, as a fraction of its own span.
+ *
+ * This used to add a flat 0.35 degrees — about 39 km — on every side of every
+ * region regardless of how big the region was. Scaling with the region keeps
+ * the limit proportionate, and keeps maxBounds from over-constraining the
+ * minimum zoom on a wide panel.
+ */
 function expand(
   [west, south, east, north]: [number, number, number, number],
-  padding: number,
+  fraction: number,
 ): [number, number, number, number] {
-  return [west - padding, south - padding, east + padding, north + padding];
+  const padX = (east - west) * fraction;
+  const padY = (north - south) * fraction;
+  return [west - padX, south - padY, east + padX, north + padY];
 }

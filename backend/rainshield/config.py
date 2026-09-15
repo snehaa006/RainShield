@@ -190,8 +190,17 @@ class Settings:
     #: Coarse mesh sampled upstream, then splined onto the 1 km grid. Stage 0
     #: used 5x5; GFS/ICON are 11-25 km native so this already over-samples.
     mesh_size: int = field(default_factory=lambda: int(os.getenv("RAINSHIELD_MESH", "5")))
+    #: Per-request upstream timeout. Both feeds answer in well under a second
+    #: when healthy, so a long timeout only buys a longer wait on the days they
+    #: are down — which are exactly the days the dashboard has to stay usable.
     http_timeout: float = field(
-        default_factory=lambda: float(os.getenv("RAINSHIELD_HTTP_TIMEOUT", "25"))
+        default_factory=lambda: float(os.getenv("RAINSHIELD_HTTP_TIMEOUT", "10"))
+    )
+    #: How long a request will wait for an in-flight refresh before serving the
+    #: last good observation instead. Fetching happens on a background thread;
+    #: this only bounds how long a *caller* blocks on it.
+    fetch_budget: float = field(
+        default_factory=lambda: float(os.getenv("RAINSHIELD_FETCH_BUDGET", "12"))
     )
     cors_origins: str = field(default_factory=lambda: os.getenv("RAINSHIELD_CORS_ORIGINS", "*"))
     #: Skip the neural net entirely and use the analytical susceptibility model.

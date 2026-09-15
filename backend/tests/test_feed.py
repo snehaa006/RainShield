@@ -28,11 +28,15 @@ def client():
 
 @pytest.fixture(autouse=True)
 def _clean():
+    # Also drop any in-flight refresh: a test that deliberately hangs one would
+    # otherwise hand its gate to the next test.
     ingest.clear_cache()
     ingest.clear_feed_log()
+    ingest.clear_inflight()
     yield
     ingest.clear_cache()
     ingest.clear_feed_log()
+    ingest.clear_inflight()
 
 
 # -- cache and log ---------------------------------------------------------
@@ -224,3 +228,88 @@ def test_auto_and_unknown_providers_fall_back_to_the_default_order():
     assert [p.name for p in ingest.build_providers("  ")] == default
     # A real preference still reorders.
     assert [p.name for p in ingest.build_providers("metno")][0] == "metno"
+
+
+# -- single-flight and bounded waits ---------------------------------------
+
+
+def test_concurrent_callers_share_one_fetch(monkeypatch):
+    """The dashboard asks for the forecast and the trend in parallel while the
+    warm-up thread runs, so an unguarded cold cache walked the provider chain
+    three times at once — against an upstream that rate-limits per IP."""
+    import threading
+    import time
+
+    calls = []
+
+    class _Slow:
+        name = "slow"
+
+        def fetch(self):
+            calls.append(time.monotonic())
+            time.sleep(0.4)
+            return ingest.SyntheticProvider(region_id=PRIMARY_REGION_ID).fetch()
+
+    monkeypatch.setattr(ingest, "build_providers", lambda *a, **k: [_Slow()])
+
+    results = []
+    threads = [
+        threading.Thread(
+            target=lambda: results.append(
+                ingest.get_observation(region_id=PRIMARY_REGION_ID, budget=5)
+            )
+        )
+        for _ in range(4)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(calls) == 1, f"expected one upstream fetch, got {len(calls)}"
+    assert len(results) == 4
+    assert all(r is not None for r in results)
+
+
+def test_a_slow_upstream_does_not_hold_the_request_open(monkeypatch):
+    """A feed that never answers should make the board older, not make it hang."""
+    import time
+
+    class _Hanging:
+        name = "hanging"
+
+        def fetch(self):
+            time.sleep(30)
+            raise AssertionError("should not be waited on")
+
+    monkeypatch.setattr(ingest, "build_providers", lambda *a, **k: [_Hanging()])
+
+    started = time.monotonic()
+    observation = ingest.get_observation(region_id=PRIMARY_REGION_ID, budget=0.5)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 5, f"request blocked for {elapsed:.1f}s"
+    # Nothing was cached, so a labelled synthetic field stands in rather than a
+    # spinner that never resolves.
+    assert observation is not None
+    assert observation.degraded is True
+
+
+def test_a_slow_upstream_serves_the_previous_observation(monkeypatch):
+    import time
+
+    good = ingest.get_observation(region_id=PRIMARY_REGION_ID)
+
+    class _Hanging:
+        name = "hanging"
+
+        def fetch(self):
+            time.sleep(30)
+            raise AssertionError("should not be waited on")
+
+    monkeypatch.setattr(ingest, "build_providers", lambda *a, **k: [_Hanging()])
+
+    served = ingest.get_observation(force_refresh=True, region_id=PRIMARY_REGION_ID, budget=0.5)
+    assert served.fetched_at == good.fetched_at
+    assert served.degraded is True
+    assert any("upstream slow" in note for note in served.notes)
