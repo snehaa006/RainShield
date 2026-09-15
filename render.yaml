@@ -22,10 +22,15 @@ services:
       - key: PYTHON_VERSION
         value: "3.11.9"
       - key: RAINSHIELD_PROVIDER
-        value: auto             # preferred live source; the rest still follow
-                                # as fallbacks. "synthetic" for an offline demo.
+        value: auto             # preferred live source ("openmeteo", "metno");
+                                # the rest still follow as fallbacks. "auto"
+                                # means no preference. "synthetic" for an
+                                # offline demo. Simulated regions ignore this.
       - key: RAINSHIELD_CACHE_TTL
         value: "600"            # seconds an observation is reused
+      # The simulated region issues an observation on the same cadence as the
+      # live feed by default; RAINSHIELD_SIM_CADENCE overrides it, and
+      # RAINSHIELD_SIM_PERIOD (minutes, default 180) sets the storm cycle.
       - key: RAINSHIELD_CORS_ORIGINS
         value: "*"              # public read-only API; no credentials are sent
       - key: PYTHONUNBUFFERED

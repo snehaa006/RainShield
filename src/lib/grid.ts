@@ -6,21 +6,31 @@
  * out of the Stage 1 tensor — the exact values the model was trained on.
  */
 
-import { REGION } from '@/lib/config';
 import type { RegionPayload } from '@/lib/api';
-import type { GridCellStatic, LandUse, Ward } from '@/types';
+import type { GridCellStatic, LandUse, RegionDescriptor, Ward } from '@/types';
 
 /**
  * Flat index of a cell. Must match the backend, which ravels a (rows, cols)
  * array row-major with row 0 on the northern edge.
  */
-export const cellIndex = (row: number, col: number): number => row * REGION.cols + col;
+export const cellIndex = (row: number, col: number, region: RegionDescriptor): number =>
+  row * region.cols + col;
 
-/** Cell footprint as a closed GeoJSON-ready ring. */
-export function cellPolygon(row: number, col: number): [number, number][] {
-  const [west, south, east, north] = REGION.bounds;
-  const width = (east - west) / REGION.cols;
-  const height = (north - south) / REGION.rows;
+/**
+ * Cell footprint as a closed GeoJSON-ready ring.
+ *
+ * Takes the region rather than reading a module constant: the grid is the same
+ * shape for every region but sits on completely different ground, and a
+ * hard-coded extent would draw one region's cells over another's map.
+ */
+export function cellPolygon(
+  row: number,
+  col: number,
+  region: RegionDescriptor,
+): [number, number][] {
+  const [west, south, east, north] = region.bounds;
+  const width = (east - west) / region.cols;
+  const height = (north - south) / region.rows;
 
   const x0 = west + col * width;
   const x1 = x0 + width;

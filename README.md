@@ -7,6 +7,11 @@ A FastAPI backend pulls live weather, runs the trained CNN-transformer over a
 45 × 39 grid of 1 km cells, and serves the scored grid to a React dashboard.
 Nothing on the board is canned any more — every number comes from the API.
 
+Two regions are served: **Mumbai Suburban**, on real terrain and live weather,
+and **Coromandel Delta**, a *simulated* region that exists to exercise the
+Warning and Critical paths Mumbai rarely reaches. Everything about the second
+one is labelled — see [Regions](#regions).
+
 ```
 ┌─ live feed ──────┐   ┌─ backend/rainshield ─────────────┐   ┌─ dashboard ─┐
 │ Open-Meteo       │──▶│ 10-channel tensor → RainShieldNet │──▶│ React +     │
@@ -36,6 +41,8 @@ npm run build      # typecheck + production bundle
 Offline, or when the upstream feed is unreachable, run the backend with
 `RAINSHIELD_PROVIDER=synthetic` for a deterministic demo field. It is always
 labelled **Degraded** in the UI — synthetic output is never presented as live.
+That is separate from the simulated *region* below, which is a deliberate second
+region rather than a fallback.
 
 One-off scoring without the API:
 
@@ -44,14 +51,128 @@ python backend/pipeline/infer_realtime.py --all-leads
 python backend/pipeline/infer_realtime.py --lead 180 --json out.json
 ```
 
+## Regions
+
+`/api/regions` lists what the service can score. Every forecast endpoint takes
+`?region=<id>`, defaulting to `mumbai`.
+
+| Region | id | Terrain | Weather | Reaches |
+| --- | --- | --- | --- | --- |
+| Mumbai Suburban | `mumbai` | Stage 0/1 rasters (real) | Open-Meteo → MET Norway (real) | whatever the weather is doing |
+| Coromandel Delta | `coromandel` | generated (`regions.py`) | scripted storm (`ingest/simulated.py`) | Normal → Watch → Warning → Critical, every cycle |
+
+### Why a simulated region exists
+
+Mumbai is quiet most of the year. With a genuinely live feed the board sits at
+Normal or Watch, so the parts of the system that matter most — the Warning and
+Critical tiers, ward escalation, time-to-inundation, the CAP alert path — never
+get exercised in a demo. The second region drives them all.
+
+**It is not dressed up as real.** A simulated region is `kind: "simulated"` in
+the registry, every observation it produces carries `simulated: true`, the
+dashboard shows an amber banner on every view, the status bar and map card tag
+the feed, and its CAP alerts append `[SIMULATED — not a real place]` to the area
+description. It never reaches for a live provider, whatever `RAINSHIELD_PROVIDER`
+says, so nothing generated can be attributed to an upstream.
+
+Note the distinction the code draws between two flags:
+
+* `degraded` — a **real** feed failed and cached or synthetic data stood in.
+* `simulated` — the field is generated. A simulated region has no real feed to
+  lose, so it is *not* degraded; it is simply not a measurement.
+
+### The storm
+
+A monsoon depression makes landfall from the sea on the eastern edge, tracks
+inland and decays, on a cycle of `RAINSHIELD_SIM_PERIOD` minutes (default 180):
+
+```
+phase 0.00   offshore, grid dry .......................... NORMAL
+phase 0.25   rainband reaches the coast .................. WATCH
+phase 0.45   landfall, peak intensity over the delta ..... CRITICAL
+phase 0.65   centre inland, coastal rain easing .......... WARNING
+phase 0.85   remnant rain, ground still saturated ........ WATCH
+```
+
+Over one 3-hour cycle that is roughly 57 min Normal, 34 Watch, 35 Warning and
+54 Critical. Antecedent rainfall and soil wetness accumulate across the cycle
+rather than tracking the instantaneous rate, so the ground stays saturated behind
+the storm and the hazard decays more slowly than the rainfall does.
+
+The storm is a **pure function of wall-clock time**, so every request computes
+the same state and the API cannot drift from a client polling it.
+
+**Lead times project, they do not loop.** Wall-clock time wraps — one depression
+follows another — but a *forecast* advances the storm that exists now and clamps
+at the end of its life:
+
+```
+storm offshore at the moment of asking
+  +0 min    11 mm/3hr   NORMAL     it is offshore
+  +30 min   58 mm/3hr   WARNING    rainband reaching the coast
+  +60 min  128 mm/3hr   CRITICAL   landfall
+  +120 min  61 mm/3hr   WATCH      centre inland
+  +180 min   2 mm/3hr   NORMAL     passed
+```
+
+Wrapping the lead times instead — which is what the first cut did — made the
++3 hr and +6 hr panels replay exactly what "now" showed, because those leads are
+whole multiples of a short cycle. A nowcast projects the current system forward
+through the rest of its life; it does not predict the next one.
+
+### It is scored by the real model
+
+The simulated region is not a canned risk map. Its terrain is generated once —
+deterministically, in the same physical units as the Stage 1 tensor — and then
+the *actual trained network* runs over it to produce susceptibility, exactly as
+it does for Mumbai. Only the inputs are invented; the inference, the hazard model
+and the risk weights are the same code path.
+
+### The feed clock
+
+`RAINSHIELD_SIM_CADENCE` (default: the live feed's `RAINSHIELD_CACHE_TTL`) is how
+often a simulated observation is issued, so the second region delivers on the
+same rhythm the real one does rather than a rhythm of its own.
+
+A background thread issues them whether or not anyone is asking. Lazy refresh on
+request would have been enough for correctness, but a dashboard that is merely
+*open* would then see nothing arrive — the feed has to be a stream, not a side
+effect of someone clicking. Every arrival, for both regions, is appended to a
+bounded log that backs the **Live feed** view.
+
+## The live feed view
+
+`/api/observation?region=<id>` returns the current observation field by field,
+and the dashboard's **Live feed** tab renders it:
+
+* **Provenance** — region, source, whether it is live or generated, feed state,
+  which model is serving, and the grid it covers.
+* **Timing** — when the observation is valid, when the next one is due, and the
+  age counting up against the cadence. Every timestamp is given in **both UTC and
+  the region's own zone**, with the offset and zone abbreviation.
+* **Fields** — every channel the model is about to read, with units and its
+  min/mean/max across the grid, split into what the upstream *served*, what is
+  *derived* from it, and the *static* layers. The rainfall fields break down per
+  lead time.
+* **Arrivals** — the log of observations that have actually landed, newest
+  first, each with its timestamp and what was in it.
+
+> **Timestamps used to lie.** The header clock rendered the *browser's* local
+> time and then labelled it IST regardless of where the browser was, so an
+> operator outside India read a time hours off under a label saying otherwise.
+> The backend knows each region's IANA zone and now says so explicitly; the
+> client formats in that zone rather than assuming.
+
 ## Layout
 
 ```
 backend/
   rainshield/            the serving package
-    config.py            region geometry, channel order, risk weights, tiers
-    grid.py              cell geometry, wards, static layers from the Stage 1 tensor
-    ingest/              Open-Meteo provider, synthetic fallback, mesh interpolation
+    config.py            primary geometry, channel order, risk weights, tiers
+    regions.py           the region registry + the generated terrain
+    grid.py              cell geometry, wards, static layers, cached per region
+    ingest/              Open-Meteo + MET Norway, synthetic fallback, the storm
+                         simulator, the arrival log and the feed clock
     models/              network definition, torch-free checkpoint reader + forward pass
     hazard.py            susceptibility × rainfall → probability, depth, onset
     risk.py              composite score, tiers, ward roll-ups
@@ -63,7 +184,8 @@ backend/
     stage2_train         trains RainShieldNet, saves weights + risk raster
     stage3_dashboard     the 4-panel validation figure
     infer_realtime       standalone live scoring
-  tests/                 33 tests: checkpoint, numpy/torch equivalence, ingest, hazard, API
+  tests/                 81 tests: checkpoint, numpy/torch equivalence, ingest,
+                         hazard, API, the region registry and the feed
 src/                     the React dashboard
 processed_data/          aligned rasters, the Stage 1 tensor, the trained weights
 ```
@@ -166,12 +288,17 @@ source is still live data.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /health` | model state, provider, feed age |
+| `GET /health` | model state, provider, and every region's feed |
+| `GET /api/regions` | the regions on offer, live and simulated |
 | `GET /api/region` | static grid, wards, terrain and exposure layers — fetch once |
+| `GET /api/observation` | the current observation field by field, with timestamps |
 | `GET /api/forecast?lead=` | scored grid at one lead time + region and ward roll-ups |
 | `GET /api/series` | region-wide trend across every lead time |
 | `GET /api/cell/{row}/{col}` | one cell across every lead time |
 | `POST /api/refresh` | drop the cached observation and re-pull |
+
+Every endpoint except `/api/regions` takes `?region=<id>`; omitting it means
+`mumbai`. An unknown id is a 404 rather than a silent fallback.
 
 The what-if sliders are query parameters on the forecast endpoints:
 `extra_rainfall` (mm), `soil_saturation` (0.5–1.5), `drainage_capacity`
@@ -183,8 +310,10 @@ GeoJSON features per refresh. Interactive docs at `/docs`.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `RAINSHIELD_PROVIDER` | `openmeteo` | preferred live source (`openmeteo`, `metno`); the others still follow as fallbacks. `synthetic` for an offline demo |
+| `RAINSHIELD_PROVIDER` | `openmeteo` | preferred live source (`openmeteo`, `metno`); the others still follow as fallbacks. `synthetic` for an offline demo. Ignored by simulated regions, which never call out |
 | `RAINSHIELD_CACHE_TTL` | `600` | seconds an observation is reused |
+| `RAINSHIELD_SIM_CADENCE` | `RAINSHIELD_CACHE_TTL` | seconds between simulated observations |
+| `RAINSHIELD_SIM_PERIOD` | `90` | minutes for one full landfall cycle |
 | `RAINSHIELD_MESH` | `5` | upstream sample mesh per axis |
 | `RAINSHIELD_CORS_ORIGINS` | `*` | comma-separated allowed origins |
 | `RAINSHIELD_PROCESSED_DIR` | `./processed_data` | weights and Stage 1 tensor |
@@ -233,8 +362,13 @@ pytest tests/ -q
 ```
 
 Covers the torch-free checkpoint reader against `torch.load`, the NumPy forward
-pass against PyTorch, Open-Meteo parsing (including null handling and the
-latitude orientation), hazard monotonicity, and the API contract.
+pass against PyTorch, Open-Meteo and MET Norway parsing (including null handling
+and the latitude orientation), the provider fallback chain, hazard monotonicity,
+the API contract, the region registry, the generated terrain, the storm's tier
+coverage, the per-region cache and the arrival log.
+
+The four PyTorch-dependent tests skip without `torch` installed; everything else
+runs from `requirements.txt` plus `pytest` and `httpx`.
 
 ## Stack
 

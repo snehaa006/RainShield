@@ -1,6 +1,6 @@
-import { REGION } from '@/lib/config';
+
 import { mulberry32 } from '@/lib/math';
-import type { ScoredCell } from '@/types';
+import type { RegionDescriptor, ScoredCell } from '@/types';
 
 export type InfraType = 'hospital' | 'school' | 'bridge' | 'shelter' | 'pumping-station';
 
@@ -28,17 +28,35 @@ export const INFRA_ICONS: Record<InfraType, string> = {
   'pumping-station': '⚙',
 };
 
-/** OSM-derived critical assets. Seeded so the demo region is stable. */
-export const INFRASTRUCTURE: InfraAsset[] = buildInfrastructure();
+/**
+ * OSM-derived critical assets, laid out inside a region's extent.
+ *
+ * Seeded on the region id so each region gets a stable set of its own rather
+ * than every region inheriting the first one's coordinates.
+ */
+const CACHE = new Map<string, InfraAsset[]>();
+
+export function infrastructureFor(region: RegionDescriptor | null): InfraAsset[] {
+  if (!region) return [];
+  const cached = CACHE.get(region.id);
+  if (cached) return cached;
+  const built = buildInfrastructure(region);
+  CACHE.set(region.id, built);
+  return built;
+}
 
 /** Assets whose cell is expected to flood, ordered by severity. */
-export function exposedAssets(cells: ScoredCell[]): (InfraAsset & { depth: number })[] {
+export function exposedAssets(
+  cells: ScoredCell[],
+  region: RegionDescriptor | null,
+): (InfraAsset & { depth: number })[] {
+  if (!region) return [];
   const byKey = new Map(cells.map((c) => [`${c.col}:${c.row}`, c]));
-  const [west, south, east, north] = REGION.bounds;
-  const cellWidth = (east - west) / REGION.cols;
-  const cellHeight = (north - south) / REGION.rows;
+  const [west, south, east, north] = region.bounds;
+  const cellWidth = (east - west) / region.cols;
+  const cellHeight = (north - south) / region.rows;
 
-  return INFRASTRUCTURE.map((asset) => {
+  return infrastructureFor(region).map((asset) => {
     const col = Math.floor((asset.lon - west) / cellWidth);
     const row = Math.floor((asset.lat - south) / cellHeight);
     const cell = byKey.get(`${col}:${row}`);
@@ -48,9 +66,12 @@ export function exposedAssets(cells: ScoredCell[]): (InfraAsset & { depth: numbe
     .sort((a, b) => b.depth - a.depth);
 }
 
-function buildInfrastructure(): InfraAsset[] {
-  const random = mulberry32(4242);
-  const [west, south, east, north] = REGION.bounds;
+function buildInfrastructure(region: RegionDescriptor): InfraAsset[] {
+  // Seed from the region id so two regions do not share a layout.
+  const random = mulberry32(
+    [...region.id].reduce((acc, ch) => (acc * 31 + ch.charCodeAt(0)) >>> 0, 4242),
+  );
+  const [west, south, east, north] = region.bounds;
   const plan: { type: InfraType; count: number; prefix: string }[] = [
     { type: 'hospital', count: 6, prefix: 'Civic Hospital' },
     { type: 'school', count: 9, prefix: 'Municipal School' },

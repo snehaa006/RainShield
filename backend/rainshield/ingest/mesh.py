@@ -10,24 +10,30 @@ from __future__ import annotations
 import numpy as np
 from scipy.interpolate import RectBivariateSpline
 
-from rainshield.config import REGION, SETTINGS
+from rainshield.config import SETTINGS
+from rainshield.regions import PRIMARY_REGION_ID, get_region
 
 
-def mesh_coordinates(size: int | None = None) -> tuple[np.ndarray, np.ndarray]:
+def mesh_coordinates(
+    size: int | None = None, region_id: str = PRIMARY_REGION_ID
+) -> tuple[np.ndarray, np.ndarray]:
     """Ascending sample latitudes and longitudes for the request mesh."""
     n = size or SETTINGS.mesh_size
-    lats = np.linspace(REGION.south, REGION.north, n)
-    lons = np.linspace(REGION.west, REGION.east, n)
+    region = get_region(region_id).geometry
+    lats = np.linspace(region.south, region.north, n)
+    lons = np.linspace(region.west, region.east, n)
     return lats, lons
 
 
-def mesh_query_pairs(size: int | None = None) -> tuple[list[float], list[float]]:
+def mesh_query_pairs(
+    size: int | None = None, region_id: str = PRIMARY_REGION_ID
+) -> tuple[list[float], list[float]]:
     """Flattened (lat, lon) pairs in row-major order over the mesh.
 
     The flattening order matches :func:`interpolate_mesh`, which reshapes the
     upstream response back to (n_lats, n_lons).
     """
-    lats, lons = mesh_coordinates(size)
+    lats, lons = mesh_coordinates(size, region_id)
     qlat: list[float] = []
     qlon: list[float] = []
     for lat in lats:
@@ -37,7 +43,9 @@ def mesh_query_pairs(size: int | None = None) -> tuple[list[float], list[float]]
     return qlat, qlon
 
 
-def interpolate_mesh(values: np.ndarray, size: int | None = None) -> np.ndarray:
+def interpolate_mesh(
+    values: np.ndarray, size: int | None = None, region_id: str = PRIMARY_REGION_ID
+) -> np.ndarray:
     """Spline a coarse (n, n) mesh onto the (rows, cols) grid.
 
     Returns an array whose row 0 is the NORTHERN edge. Stage 0 evaluated the
@@ -45,15 +53,16 @@ def interpolate_mesh(values: np.ndarray, size: int | None = None) -> np.ndarray:
     north-up raster, which flipped those layers; the explicit flip here is what
     fixes that.
     """
-    lats, lons = mesh_coordinates(size)
+    lats, lons = mesh_coordinates(size, region_id)
     grid = np.asarray(values, dtype=np.float64).reshape(len(lats), len(lons))
 
     # Spline degree must be < the number of samples along each axis.
     k = min(3, len(lats) - 1, len(lons) - 1)
     spline = RectBivariateSpline(lats, lons, grid, kx=k, ky=k)
 
-    out_lats = np.linspace(REGION.south, REGION.north, REGION.rows)  # ascending
-    out_lons = np.linspace(REGION.west, REGION.east, REGION.cols)
+    region = get_region(region_id).geometry
+    out_lats = np.linspace(region.south, region.north, region.rows)  # ascending
+    out_lons = np.linspace(region.west, region.east, region.cols)
     south_up = spline(out_lats, out_lons)
 
     # Flip so row 0 is north, matching the Stage 0 GeoTIFF transform.

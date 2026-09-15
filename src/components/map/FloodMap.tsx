@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import maplibregl, { type Map as MapLibreMap } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { REGION } from '@/lib/config';
 import { cellPolygon } from '@/lib/grid';
-import { INFRASTRUCTURE, INFRA_ICONS, INFRA_LABELS } from '@/lib/infrastructure';
+import { infrastructureFor, INFRA_ICONS, INFRA_LABELS } from '@/lib/infrastructure';
 import { useDashboard } from '@/hooks/useDashboard';
 import { BASE_STYLE } from '@/components/map/mapStyle';
 import { paintCell } from '@/components/map/layerPaint';
@@ -13,8 +12,16 @@ const GRID_SOURCE = 'grid';
 const WARD_SOURCE = 'wards';
 
 export function FloodMap() {
-  const { cells, wards, activeLayer, showInfrastructure, selectedWardId, selectCell, selectWard } =
-    useDashboard();
+  const {
+    cells,
+    wards,
+    region,
+    activeLayer,
+    showInfrastructure,
+    selectedWardId,
+    selectCell,
+    selectWard,
+  } = useDashboard();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
@@ -28,15 +35,17 @@ export function FloodMap() {
   const handlers = useRef({ selectCell, selectWard });
   handlers.current = { selectCell, selectWard };
 
+  // The map cannot be created until the region is known — its centre, extent
+  // and pan limits all come from it, and they differ per region.
   useEffect(() => {
-    if (!containerRef.current) return undefined;
+    if (!containerRef.current || !region) return undefined;
 
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: BASE_STYLE,
-      center: REGION.centre,
+      center: region.centre,
       zoom: 10.4,
-      maxBounds: expand(REGION.bounds, 0.35),
+      maxBounds: expand(region.bounds, 0.35),
       attributionControl: { compact: true },
     });
     mapRef.current = map;
@@ -45,7 +54,7 @@ export function FloodMap() {
 
     // Fill the panel with the region rather than sitting at a fixed zoom, so a
     // wide container shows a correspondingly larger grid.
-    map.fitBounds(REGION.bounds, { padding: 32, duration: 0 });
+    map.fitBounds(region.bounds, { padding: 32, duration: 0 });
 
     map.on('load', () => {
       map.addSource(GRID_SOURCE, { type: 'geojson', data: emptyCollection() });
@@ -108,16 +117,18 @@ export function FloodMap() {
       map.remove();
       mapRef.current = null;
     };
-    // The map is created once; data updates flow through the effects below.
+    // Rebuilt only when the region changes — a different region means a
+    // different centre, extent and pan limit, which the constructor fixes at
+    // creation. Ordinary data updates flow through the effects below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [region?.id]);
 
   // Push new model output / layer selection into the grid source.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !ready) return;
-    refreshGrid(map, cells, activeLayer);
-  }, [ready, cells, activeLayer]);
+    if (!map || !ready || !region) return;
+    refreshGrid(map, cells, activeLayer, region);
+  }, [ready, cells, activeLayer, region]);
 
   // Ward outlines arrive with /api/region, so they are pushed in once available.
   useEffect(() => {
@@ -157,7 +168,7 @@ export function FloodMap() {
     markersRef.current = [];
     if (!showInfrastructure) return;
 
-    markersRef.current = INFRASTRUCTURE.map((asset) => {
+    markersRef.current = infrastructureFor(region).map((asset) => {
       const element = document.createElement('div');
       element.className =
         'flex h-5 w-5 items-center justify-center rounded-full border border-slate-300/70 ' +
@@ -166,7 +177,7 @@ export function FloodMap() {
       element.title = `${asset.name} — ${INFRA_LABELS[asset.type]}`;
       return new maplibregl.Marker({ element }).setLngLat([asset.lon, asset.lat]).addTo(map);
     });
-  }, [showInfrastructure]);
+  }, [showInfrastructure, region, ready]);
 
   return <div ref={containerRef} className="h-full w-full" />;
 }
@@ -175,6 +186,7 @@ function refreshGrid(
   map: MapLibreMap,
   cells: ReturnType<typeof useDashboard>['cells'],
   layer: ReturnType<typeof useDashboard>['activeLayer'],
+  region: NonNullable<ReturnType<typeof useDashboard>['region']>,
 ) {
   const source = map.getSource(GRID_SOURCE) as maplibregl.GeoJSONSource | undefined;
   if (!source) return;
@@ -184,7 +196,7 @@ function refreshGrid(
     features: cells.map((cell, index) => ({
       type: 'Feature',
       id: index,
-      geometry: { type: 'Polygon', coordinates: [cellPolygon(cell.row, cell.col)] },
+      geometry: { type: 'Polygon', coordinates: [cellPolygon(cell.row, cell.col, region)] },
       properties: {
         id: cell.id,
         wardId: cell.wardId,

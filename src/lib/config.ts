@@ -107,23 +107,16 @@ export const DEPTH_RAMP: { value: number; color: string }[] = [
   { value: 1.5, color: '#ec4899' },
 ];
 
-/** Ingestion feeds shown in the data-source health strip. */
-export const DATA_SOURCES = [
-  { id: 'radar', label: 'IMD Doppler Radar', cadence: '10 min' },
-  { id: 'satellite', label: 'INSAT-3DR / GPM', cadence: '30 min' },
-  { id: 'aws', label: 'AWS/ARG Network', cadence: '15 min' },
-  { id: 'nwp', label: 'WRF / GFS', cadence: '6 hr' },
-  { id: 'cwc', label: 'CWC River Gauges', cadence: '1 hr' },
-];
-
 export const DEFAULT_WHAT_IF = {
   extraRainfall: 0,
   soilSaturation: 1,
   drainageCapacity: 1,
 };
 
-/** Feed labels for the ingestion health strip, keyed to the live provider. */
+/** Feed labels for the ingestion health strip, keyed to the provider name. */
 export const FEED_LABELS: Record<string, string> = {
   openmeteo: 'Open-Meteo live feed',
+  metno: 'MET Norway live feed',
   synthetic: 'Synthetic demo field',
+  'simulated-storm': 'Simulated storm feed',
 };

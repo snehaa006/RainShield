@@ -21,8 +21,9 @@ import threading
 
 import numpy as np
 
-from rainshield.config import CHANNELS, N_CHANNELS, REGION, SETTINGS
+from rainshield.config import CHANNELS, N_CHANNELS, SETTINGS
 from rainshield.grid import static_layers
+from rainshield.regions import PRIMARY_REGION_ID, get_region
 from rainshield.ingest.base import (
     LiveObservation,
     brightness_temp_from_cloud,
@@ -50,13 +51,16 @@ REQUIRED_PARAMS = (
 )
 
 
-def build_input_tensor(observation: LiveObservation, lead: int) -> np.ndarray:
+def build_input_tensor(
+    observation: LiveObservation, lead: int, region_id: str | None = None
+) -> np.ndarray:
     """Assemble the (10, rows, cols) raw-unit model input for one lead time.
 
     Dynamic channels are derived from live data with the same formulas Stage 0
     used, so the values carry the units the network was trained on.
     """
-    static = static_layers()
+    region_id = region_id or observation.region_id
+    static = static_layers(region_id)
     rain_rate = observation.rain_rate[lead]
     rain_3h = observation.rain_3h[lead]
 
@@ -80,7 +84,7 @@ def build_input_tensor(observation: LiveObservation, lead: int) -> np.ndarray:
     }
 
     tensor = np.stack([channels[name] for name in CHANNELS]).astype(np.float32)
-    if tensor.shape != (N_CHANNELS, *REGION.shape):
+    if tensor.shape != (N_CHANNELS, *get_region(region_id).geometry.shape):
         raise ValueError(f"input tensor has shape {tensor.shape}")
     return tensor
 
@@ -138,25 +142,28 @@ def model_status() -> dict:
     }
 
 
-def analytical_susceptibility() -> np.ndarray:
+def analytical_susceptibility(region_id: str = PRIMARY_REGION_ID) -> np.ndarray:
     """Terrain susceptibility without torch.
 
     A smooth logistic stand-in for the trained network, built from the same two
     terrain drivers the training target was derived from. Used when the
     checkpoint cannot be loaded, so the service still returns a sensible map.
     """
-    static = static_layers()
+    static = static_layers(region_id)
     elevation, slope = static["elevation"], static["slope"]
     score = 2.2 - 0.32 * (elevation - 12.0) - 1.1 * (slope - 1.5)
     return (1.0 / (1.0 + np.exp(-np.clip(score, -30, 30)))).astype(np.float32)
 
 
-def predict_susceptibility(observation: LiveObservation, lead: int = 0) -> np.ndarray:
+def predict_susceptibility(
+    observation: LiveObservation, lead: int = 0, region_id: str | None = None
+) -> np.ndarray:
     """Per-cell flood susceptibility, (rows, cols) in 0-1."""
+    region_id = region_id or observation.region_id
     params = get_model()
     if params is None:
-        return analytical_susceptibility()
+        return analytical_susceptibility(region_id)
 
     from rainshield.models.numpy_backend import forward
 
-    return forward(build_input_tensor(observation, lead), params)
+    return forward(build_input_tensor(observation, lead, region_id), params)

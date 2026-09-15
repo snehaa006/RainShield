@@ -9,20 +9,22 @@
  */
 
 import { API_BASE } from '@/lib/config';
-import type { AlertTier, Confidence, FeedStatus, LeadTime, ModelStatus, WhatIfSettings } from '@/types';
+import type {
+  AlertTier,
+  Confidence,
+  FeedArrival,
+  FeedField,
+  FeedStatus,
+  LeadTime,
+  ModelStatus,
+  RegionDescriptor,
+  Stamp,
+  StormPhase,
+  WhatIfSettings,
+} from '@/types';
 
 export interface RegionPayload {
-  region: {
-    name: string;
-    state: string;
-    bounds: [number, number, number, number];
-    centre: [number, number];
-    rows: number;
-    cols: number;
-    cellCount: number;
-    cellWidth: number;
-    cellHeight: number;
-  };
+  region: RegionDescriptor;
   leadTimes: LeadTime[];
   wards: { id: string; name: string; lon: number; lat: number }[];
   cells: {
@@ -39,6 +41,8 @@ export interface RegionPayload {
 
 export interface ForecastPayload {
   lead: LeadTime;
+  region: RegionDescriptor;
+  storm: StormPhase | null;
   generatedAt: string;
   confidence: Confidence;
   isSimulating: boolean;
@@ -108,9 +112,39 @@ export const EMPTY_SUMMARY: RegionSummary = {
 };
 
 export interface SeriesPayload {
+  region: RegionDescriptor;
   observation: FeedStatus;
   isSimulating: boolean;
   series: SeriesPoint[];
+}
+
+/** Everything in the current observation, as the live-feed view renders it. */
+export interface ObservationPayload {
+  region: RegionDescriptor;
+  observation: FeedStatus;
+  model: {
+    loaded: boolean;
+    backend: string;
+    runtime: string;
+    weights_present: boolean;
+    error: string | null;
+  };
+  storm: StormPhase | null;
+  leadTimes: LeadTime[];
+  channelOrder: string[];
+  dynamicChannels: string[];
+  fields: {
+    observed: FeedField[];
+    derived: FeedField[];
+    static: FeedField[];
+  };
+  arrivals: FeedArrival[];
+  servedAt: Stamp;
+}
+
+export interface RegionsPayload {
+  regions: RegionDescriptor[];
+  default: string;
 }
 
 export interface SeriesPoint {
@@ -137,6 +171,11 @@ function whatIfParams(whatIf: WhatIfSettings): Record<string, string> {
     soil_saturation: String(whatIf.soilSaturation),
     drainage_capacity: String(whatIf.drainageCapacity),
   };
+}
+
+/** Every forecast endpoint is scoped to a region; omitting it means the default. */
+function regionParam(region?: string): Record<string, string> {
+  return region ? { region } : {};
 }
 
 async function request<T>(
@@ -170,14 +209,29 @@ async function request<T>(
   return response.json() as Promise<T>;
 }
 
-export const fetchRegion = (signal?: AbortSignal) =>
-  request<RegionPayload>('/api/region', {}, signal);
+export const fetchRegions = (signal?: AbortSignal) =>
+  request<RegionsPayload>('/api/regions', {}, signal);
 
-export const fetchForecast = (lead: LeadTime, whatIf: WhatIfSettings, signal?: AbortSignal) =>
-  request<ForecastPayload>('/api/forecast', { lead: String(lead), ...whatIfParams(whatIf) }, signal);
+export const fetchRegion = (region?: string, signal?: AbortSignal) =>
+  request<RegionPayload>('/api/region', regionParam(region), signal);
 
-export const fetchSeries = (whatIf: WhatIfSettings, signal?: AbortSignal) =>
-  request<SeriesPayload>('/api/series', whatIfParams(whatIf), signal);
+export const fetchForecast = (
+  lead: LeadTime,
+  whatIf: WhatIfSettings,
+  region?: string,
+  signal?: AbortSignal,
+) =>
+  request<ForecastPayload>(
+    '/api/forecast',
+    { lead: String(lead), ...whatIfParams(whatIf), ...regionParam(region) },
+    signal,
+  );
+
+export const fetchSeries = (whatIf: WhatIfSettings, region?: string, signal?: AbortSignal) =>
+  request<SeriesPayload>('/api/series', { ...whatIfParams(whatIf), ...regionParam(region) }, signal);
+
+export const fetchObservation = (region?: string, signal?: AbortSignal) =>
+  request<ObservationPayload>('/api/observation', regionParam(region), signal);
 
 export const fetchHealth = (signal?: AbortSignal) =>
   request<{ status: string; model: ModelStatus; provider: string; observation: FeedStatus }>(
@@ -187,8 +241,9 @@ export const fetchHealth = (signal?: AbortSignal) =>
   );
 
 /** Drop the backend's cached observation and pull the live feed again. */
-export async function refreshFeed(): Promise<void> {
+export async function refreshFeed(region?: string): Promise<void> {
   const url = new URL(`${API_BASE}/api/refresh`, window.location.origin);
+  if (region) url.searchParams.set('region', region);
   const response = await fetch(url, { method: 'POST' });
   if (!response.ok) throw new ApiError(`Refresh failed (HTTP ${response.status})`, response.status);
 }

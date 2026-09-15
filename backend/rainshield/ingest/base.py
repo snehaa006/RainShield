@@ -8,7 +8,8 @@ from typing import Protocol
 
 import numpy as np
 
-from rainshield.config import LEAD_TIMES, REGION
+from rainshield.config import LEAD_TIMES
+from rainshield.regions import PRIMARY_REGION_ID, get_region
 
 
 @dataclass
@@ -34,12 +35,18 @@ class LiveObservation:
     #: True when upstream data was unavailable and a fallback filled in.
     degraded: bool = False
     notes: list[str] = field(default_factory=list)
+    #: Region this observation describes.
+    region_id: str = PRIMARY_REGION_ID
+    #: True when the whole field is generated rather than observed. Distinct
+    #: from `degraded`, which means a real feed failed and something stood in:
+    #: a simulated region has no real feed to lose.
+    simulated: bool = False
 
     def age_seconds(self) -> float:
         return (datetime.now(timezone.utc) - self.fetched_at).total_seconds()
 
     def validate(self) -> None:
-        expected = REGION.shape
+        expected = get_region(self.region_id).geometry.shape
         for lead in LEAD_TIMES:
             if lead not in self.rain_rate or lead not in self.rain_3h:
                 raise ValueError(f"observation is missing lead time {lead}")
@@ -90,6 +97,7 @@ def assemble_observation(
     cloud: np.ndarray | None = None,
     soil: np.ndarray | None = None,
     notes: list[str] | None = None,
+    region_id: str = PRIMARY_REGION_ID,
 ) -> "LiveObservation":
     """Build an observation from per-mesh-point hourly series.
 
@@ -126,26 +134,27 @@ def assemble_observation(
         hi = min(max(int(np.ceil(end)), lo + 1), n_hours)
         return precip[:, lo:hi].sum(axis=1)
 
-    rain_rate = {lead: interpolate_mesh(at(lead, precip), mesh_size) for lead in LEAD_TIMES}
-    rain_3h = {lead: interpolate_mesh(accum_3h(lead), mesh_size) for lead in LEAD_TIMES}
+    def spline(values: np.ndarray) -> np.ndarray:
+        return interpolate_mesh(values, mesh_size, region_id=region_id)
 
-    antecedent = np.clip(
-        interpolate_mesh(precip[:, max(0, idx - 24) : idx + 1].sum(axis=1), mesh_size), 0.0, None
-    )
+    rain_rate = {lead: spline(at(lead, precip)) for lead in LEAD_TIMES}
+    rain_3h = {lead: spline(accum_3h(lead)) for lead in LEAD_TIMES}
+
+    antecedent = np.clip(spline(precip[:, max(0, idx - 24) : idx + 1].sum(axis=1)), 0.0, None)
 
     # Ground wets with the rain that has already fallen: a stand-in when the
     # upstream serves no soil moisture. 60 mm over 24 hr saturates the top layer.
     if soil is None:
         soil_grid = np.clip(0.22 + antecedent / 60.0, 0.0, 1.0)
     else:
-        soil_grid = np.clip(interpolate_mesh(at(0, soil), mesh_size), 0.0, 1.0)
+        soil_grid = np.clip(spline(at(0, soil)), 0.0, 1.0)
 
     # Cloud cover only feeds the brightness-temperature channel, which the
     # network is barely sensitive to; overcast is the safe default in a storm.
     cloud_grid = (
         np.full_like(antecedent, 70.0)
         if cloud is None
-        else np.clip(interpolate_mesh(at(0, cloud), mesh_size), 0.0, 100.0)
+        else np.clip(spline(at(0, cloud)), 0.0, 100.0)
     )
 
     observation = LiveObservation(
@@ -158,6 +167,7 @@ def assemble_observation(
         antecedent_24h=antecedent,
         degraded=False,
         notes=notes,
+        region_id=region_id,
     )
     observation.validate()
     return observation
