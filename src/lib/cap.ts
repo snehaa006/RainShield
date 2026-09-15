@@ -1,6 +1,6 @@
-import { REGION, TIER_LABELS } from '@/lib/config';
+import { TIER_LABELS } from '@/lib/config';
 import { duration, metres, percent } from '@/lib/format';
-import type { AlertTier, CapAlert, WardSummary } from '@/types';
+import type { AlertTier, CapAlert, RegionDescriptor, WardSummary } from '@/types';
 
 const SEVERITY: Record<AlertTier, CapAlert['severity']> = {
   NORMAL: 'Minor',
@@ -26,13 +26,25 @@ const INSTRUCTIONS: Record<AlertTier, string> = {
     'Evacuate low-lying pockets immediately. Activate relief shelters, close flooded underpasses and deploy rescue teams.',
 };
 
-/** Build a CAP 1.2 payload from the warning engine's ward-level output. */
-export function buildCapAlert(ward: WardSummary, sentAt = new Date()): CapAlert {
+/**
+ * Build a CAP 1.2 payload from the warning engine's ward-level output.
+ *
+ * `status` is Exercise for a live region and stays Exercise for a simulated
+ * one — but a simulated region also says so in the area description, so an
+ * alert lifted out of the UI cannot be mistaken for a real place.
+ */
+export function buildCapAlert(
+  ward: WardSummary,
+  region: RegionDescriptor | null,
+  sentAt = new Date(),
+): CapAlert {
   const certainty =
     ward.confidence === 'HIGH' ? 'Likely' : ward.confidence === 'MEDIUM' ? 'Possible' : 'Possible';
 
   return {
-    identifier: `RAINSHIELD-${REGION.state.slice(0, 2).toUpperCase()}-${ward.ward.id.toUpperCase()}-${sentAt.getTime()}`,
+    identifier:
+      `RAINSHIELD-${(region?.state ?? 'XX').slice(0, 2).toUpperCase()}` +
+      `-${ward.ward.id.toUpperCase()}-${sentAt.getTime()}`,
     sent: sentAt.toISOString(),
     status: 'Exercise',
     msgType: 'Alert',
@@ -47,7 +59,9 @@ export function buildCapAlert(ward: WardSummary, sentAt = new Date()): CapAlert 
       `${metres(ward.peakWaterDepth)}. Estimated onset in ${duration(ward.timeToInundation)}. ` +
       `Ensemble confidence: ${ward.confidence.toLowerCase()}.`,
     instruction: INSTRUCTIONS[ward.tier],
-    areaDesc: `${ward.ward.name}, ${REGION.name}, ${REGION.state}`,
+    areaDesc:
+      `${ward.ward.name}, ${region?.name ?? 'unknown region'}, ${region?.state ?? ''}` +
+      (region?.simulated ? ' [SIMULATED — not a real place]' : ''),
     expires: new Date(sentAt.getTime() + 6 * 3600_000).toISOString(),
   };
 }

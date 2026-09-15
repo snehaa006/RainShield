@@ -6,8 +6,8 @@ import { Panel } from '@/components/ui/Panel';
 
 /** Critical assets sitting in cells the inundation model expects to flood. */
 export function ExposurePanel({ className = '' }: { className?: string }) {
-  const { cells } = useDashboard();
-  const exposed = useMemo(() => exposedAssets(cells), [cells]);
+  const { cells, region } = useDashboard();
+  const exposed = useMemo(() => exposedAssets(cells, region), [cells, region]);
 
   return (
     <Panel

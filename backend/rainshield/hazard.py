@@ -18,6 +18,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from rainshield.grid import static_layers
+from rainshield.regions import PRIMARY_REGION_ID
 
 #: Effective 3 hr rainfall at which the hazard response reaches 1 - 1/e.
 #: Anchored to the spec's 100 mm/3 hr trigger.
@@ -82,9 +83,10 @@ def compute_hazard(
     soil_moisture: np.ndarray,
     lead: int,
     what_if: WhatIf = DEFAULT_WHAT_IF,
+    region_id: str = PRIMARY_REGION_ID,
 ) -> HazardField:
     """Combine the model's susceptibility with live rainfall forcing."""
-    elevation = static_layers()["elevation"]
+    elevation = static_layers(region_id)["elevation"]
 
     forcing = effective_rainfall(rain_3h, soil_moisture, what_if)
     response = 1.0 - np.exp(-forcing / RAINFALL_SCALE_MM)

@@ -35,10 +35,18 @@ export function FeedNote() {
             Simulated
           </span>
         )}
-        {feed.degraded && (
+        {feed.simulated && (
           <span
             className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-medium
               text-amber-300"
+          >
+            Simulated
+          </span>
+        )}
+        {feed.degraded && !feed.simulated && (
+          <span
+            className="rounded-full bg-tier-warning/20 px-2 py-0.5 text-[10px] font-medium
+              text-tier-warning"
           >
             Degraded
           </span>
@@ -49,11 +57,18 @@ export function FeedNote() {
         {model?.loaded
           ? `${model.backend} · ${model.runtime}`
           : 'Analytical fallback — model weights unavailable'}
-        {generatedAt && ` · scored ${new Date(generatedAt).toLocaleTimeString('en-GB', { hour12: false })}`}
+        {generatedAt &&
+          ` · scored ${new Date(generatedAt).toLocaleTimeString('en-GB', {
+            hour12: false,
+            timeZone: feed.timestamp.timezone,
+          })} ${feed.timestamp.abbreviation}`}
       </p>
 
-      {feed.degraded && feed.notes.length > 0 && (
-        <p className="mt-1 text-[11px] leading-relaxed text-amber-300/80">{feed.notes.join(' · ')}</p>
+      {(feed.degraded || feed.simulated) && feed.notes.length > 0 && (
+        <p className="mt-1 max-h-24 overflow-y-auto scroll-thin break-words text-[11px]
+          leading-relaxed text-amber-300/80">
+          {feed.notes.join(' · ')}
+        </p>
       )}
     </div>
   );

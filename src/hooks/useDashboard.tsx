@@ -13,6 +13,7 @@ import {
   EMPTY_SUMMARY,
   fetchForecast,
   fetchRegion,
+  fetchRegions,
   fetchSeries,
   refreshFeed,
   type ForecastPayload,
@@ -29,13 +30,17 @@ import type {
   LayerId,
   LeadTime,
   ModelStatus,
+  RegionDescriptor,
   ScoredCell,
+  StormPhase,
   Ward,
   WardSummary,
   WhatIfSettings,
 } from '@/types';
 
 interface DashboardState {
+  /** Region being scored. Every API call is scoped to it. */
+  regionId: string;
   lead: LeadTime;
   whatIf: WhatIfSettings;
   activeLayer: LayerId;
@@ -45,6 +50,12 @@ interface DashboardState {
 }
 
 interface DashboardValue extends DashboardState {
+  /** Every region the backend can score, live and simulated. */
+  regions: RegionDescriptor[];
+  /** The active region's descriptor, null until /api/regions resolves. */
+  region: RegionDescriptor | null;
+  /** Where the scripted storm is, for a simulated region; null for a live one. */
+  storm: StormPhase | null;
   /** Static grid, empty until /api/region resolves. */
   grid: GridCellStatic[];
   wards: Ward[];
@@ -75,12 +86,14 @@ interface DashboardValue extends DashboardState {
   toggleInfrastructure: () => void;
   selectWard: (id: string | null) => void;
   selectCell: (id: string | null) => void;
+  setRegionId: (id: string) => void;
 }
 
 const DashboardContext = createContext<DashboardValue | null>(null);
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<DashboardState>({
+    regionId: 'mumbai',
     lead: 120,
     whatIf: DEFAULT_WHAT_IF,
     activeLayer: 'risk',
@@ -89,6 +102,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     selectedCellId: null,
   });
 
+  const [regions, setRegions] = useState<RegionDescriptor[]>([]);
   const [region, setRegion] = useState<RegionPayload | null>(null);
   const [forecast, setForecast] = useState<ForecastPayload | null>(null);
   const [series, setSeries] = useState<SeriesPayload | null>(null);
@@ -99,27 +113,38 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const patch = (next: Partial<DashboardState>) => setState((prev) => ({ ...prev, ...next }));
 
-  // The static grid is fetched once — terrain and exposure do not change.
+  // The region list is fetched once; it never changes while the app is open.
   useEffect(() => {
     const controller = new AbortController();
-    fetchRegion(controller.signal)
+    fetchRegions(controller.signal)
+      .then((payload) => setRegions(payload.regions))
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, []);
+
+  // The static grid is fetched per region — terrain and exposure do not change
+  // within one, but they are completely different between them.
+  const { regionId, lead, whatIf } = state;
+  useEffect(() => {
+    const controller = new AbortController();
+    setRegion(null);
+    fetchRegion(regionId, controller.signal)
       .then(setRegion)
       .catch((cause) => {
         if (controller.signal.aborted) return;
         setError(cause instanceof ApiError ? cause.message : String(cause));
       });
     return () => controller.abort();
-  }, []);
+  }, [regionId]);
 
-  // Forecast and trend follow the lead time, the what-if sliders and refreshes.
-  const { lead, whatIf } = state;
+  // Forecast and trend follow the region, lead time, sliders and refreshes.
   useEffect(() => {
     const controller = new AbortController();
     setIsUpdating(true);
 
     Promise.all([
-      fetchForecast(lead, whatIf, controller.signal),
-      fetchSeries(whatIf, controller.signal),
+      fetchForecast(lead, whatIf, regionId, controller.signal),
+      fetchSeries(whatIf, regionId, controller.signal),
     ])
       .then(([nextForecast, nextSeries]) => {
         if (controller.signal.aborted) return;
@@ -136,7 +161,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       });
 
     return () => controller.abort();
-  }, [lead, whatIf, reloadToken]);
+  }, [regionId, lead, whatIf, reloadToken]);
 
   // The unmodified forecast for the same horizon, so the what-if panel can show
   // a delta. Only fetched while the sliders are off their defaults.
@@ -151,13 +176,13 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       return undefined;
     }
     const controller = new AbortController();
-    fetchForecast(lead, DEFAULT_WHAT_IF, controller.signal)
+    fetchForecast(lead, DEFAULT_WHAT_IF, regionId, controller.signal)
       .then((payload) => {
         if (!controller.signal.aborted) setBaseline(payload.summary);
       })
       .catch(() => undefined);
     return () => controller.abort();
-  }, [lead, simulating, reloadToken]);
+  }, [regionId, lead, simulating, reloadToken]);
 
   // Poll so the board keeps pace with the feed without a manual reload.
   useEffect(() => {
@@ -168,10 +193,10 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(() => {
     // Ask the backend to drop its cached observation, then reload either way:
     // a failed refresh should still re-render whatever the API can serve.
-    refreshFeed()
+    refreshFeed(regionId)
       .catch(() => undefined)
       .finally(() => setReloadToken((n) => n + 1));
-  }, []);
+  }, [regionId]);
 
   const grid = useMemo(() => (region ? buildGrid(region) : []), [region]);
   const wards = useMemo(() => (region ? buildWards(region) : []), [region]);
@@ -180,6 +205,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   // panels and map consume.
   const cells = useMemo<ScoredCell[]>(() => {
     if (!forecast || grid.length === 0) return [];
+    // Both regions are 1755 cells, so a length check alone would happily paint
+    // one region's forecast onto the other's grid during a switch.
+    if (forecast.region.id !== regionId || region?.region.id !== regionId) return [];
     const { cells: c, riskComponents: rc } = forecast;
     if (c.risk.length !== grid.length) return [];
 
@@ -204,7 +232,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       },
       tier: tierFor(c.risk[i]),
     }));
-  }, [forecast, grid]);
+  }, [forecast, grid, region, regionId]);
 
   const wardById = useMemo(() => new Map(wards.map((ward) => [ward.id, ward])), [wards]);
 
@@ -240,8 +268,16 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     [cells, state.selectedCellId],
   );
 
+  const activeRegion = useMemo(
+    () => regions.find((r) => r.id === regionId) ?? region?.region ?? null,
+    [regions, region, regionId],
+  );
+
   const value: DashboardValue = {
     ...state,
+    regions,
+    region: activeRegion,
+    storm: forecast?.region.id === regionId ? forecast?.storm ?? null : null,
     grid,
     wards,
     cells,
@@ -277,6 +313,17 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       setState((prev) => ({ ...prev, showInfrastructure: !prev.showInfrastructure })),
     selectWard: (selectedWardId) => patch({ selectedWardId }),
     selectCell: (selectedCellId) => patch({ selectedCellId }),
+    // Switching region invalidates every selection — ward and cell ids belong
+    // to the region they came from — and drops back to the present. Carrying a
+    // +2 hr horizon across the switch showed the new region's forecast while
+    // the banner described its current conditions, which read as a contradiction.
+    setRegionId: (nextRegionId) =>
+      patch({
+        regionId: nextRegionId,
+        lead: 0,
+        selectedWardId: null,
+        selectedCellId: null,
+      }),
   };
 
   return <DashboardContext.Provider value={value}>{children}</DashboardContext.Provider>;

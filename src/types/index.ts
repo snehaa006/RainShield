@@ -95,16 +95,102 @@ export interface WardSummary {
   floodedCellCount: number;
 }
 
+/**
+ * One instant, rendered by the backend in both UTC and the region's own zone.
+ *
+ * The board used to format timestamps with the *browser's* locale and then
+ * label them IST, which is wrong for anyone outside India. The backend knows
+ * which zone a region is in, so it says so rather than leaving the client to
+ * assume.
+ */
+export interface Stamp {
+  utc: string;
+  local: string;
+  localTime: string;
+  localDate: string;
+  /** IANA zone, e.g. "Asia/Kolkata". */
+  timezone: string;
+  /** Short zone name, e.g. "IST". */
+  abbreviation: string;
+  /** e.g. "+05:30". */
+  utcOffset: string;
+  epoch: number;
+}
+
 /** State of the live ingestion feed, reported alongside every forecast. */
 export interface FeedStatus {
   /** Provider that produced the observation, e.g. "openmeteo". */
   source: string;
+  regionId: string;
   fetchedAt: string;
   ageSeconds: number;
   /** True when upstream failed and cached or synthetic data is standing in. */
   degraded: boolean;
+  /**
+   * True when the whole field is generated rather than observed. Distinct from
+   * `degraded`: a simulated region has no real feed to lose.
+   */
+  simulated: boolean;
   notes: string[];
   cacheTtl: number;
+  cadenceSeconds: number;
+  timestamp: Stamp;
+  nextUpdate: Stamp;
+}
+
+/** A region the service can score. */
+export interface RegionDescriptor {
+  id: string;
+  name: string;
+  state: string;
+  bounds: [number, number, number, number];
+  centre: [number, number];
+  rows: number;
+  cols: number;
+  cellCount: number;
+  cellWidth: number;
+  cellHeight: number;
+  timezone: string;
+  /** "live" — real terrain and real weather. "simulated" — neither. */
+  kind: 'live' | 'simulated';
+  simulated: boolean;
+  blurb: string;
+  cadenceSeconds: number;
+}
+
+/** Where the scripted storm is, for a simulated region. */
+export interface StormPhase {
+  phase: number;
+  label: string;
+}
+
+/** One field of the current observation, as the live-feed view lists it. */
+export interface FeedField {
+  key: string;
+  unit: string;
+  description: string;
+  min: number;
+  mean: number;
+  max: number;
+  /** Model channel this field feeds, when it feeds one directly. */
+  modelChannel?: string | null;
+  /** Per-lead-time spread, for the fields that vary with the horizon. */
+  perLead?: Record<string, { min: number; mean: number; max: number }> | null;
+}
+
+/** One observation landing on the feed. */
+export interface FeedArrival {
+  source: string;
+  degraded: boolean;
+  simulated: boolean;
+  peakRainRate: number;
+  meanRainRate: number;
+  peakRain3h: number;
+  peakSoilMoisture: number;
+  meanCloudCover: number;
+  peakAntecedent24h: number;
+  notes: string[];
+  timestamp: Stamp;
 }
 
 /** State of the inference backend. */

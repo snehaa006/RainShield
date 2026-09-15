@@ -127,7 +127,7 @@ def test_chain_falls_through_to_the_second_source(monkeypatch):
             raise OpenMeteoError("HTTP 429: Daily API request limit exceeded", status=429)
 
     _patch(monkeypatch, lambda kw, R: R(200, _payload()))
-    monkeypatch.setattr(ingest, "build_providers", lambda: [_Dead(), MetNoProvider(mesh_size=MESH)])
+    monkeypatch.setattr(ingest, "build_providers", lambda *a, **k: [_Dead(), MetNoProvider(mesh_size=MESH)])
 
     observation = ingest.get_observation(force_refresh=True)
     assert observation.source == "metno"
@@ -148,7 +148,7 @@ def test_chain_falls_back_to_synthetic_when_all_sources_fail(monkeypatch):
         def fetch(self):
             raise RuntimeError(f"{self.name} is down")
 
-    monkeypatch.setattr(ingest, "build_providers", lambda: [_Dead("openmeteo"), _Dead("metno")])
+    monkeypatch.setattr(ingest, "build_providers", lambda *a, **k: [_Dead("openmeteo"), _Dead("metno")])
 
     observation = ingest.get_observation(force_refresh=True)
     assert observation.source == "synthetic"

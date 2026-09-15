@@ -13,11 +13,11 @@ const CHANNELS = [
 
 /** CAP payload preview plus the dissemination channels it would fan out to. */
 export function CapPanel({ className = '' }: { className?: string }) {
-  const { selectedWard, wardSummaries } = useDashboard();
+  const { selectedWard, wardSummaries, region } = useDashboard();
   const [view, setView] = useState<'summary' | 'xml'>('summary');
   const ward = selectedWard ?? wardSummaries[0];
 
-  const alert = useMemo(() => (ward ? buildCapAlert(ward) : null), [ward]);
+  const alert = useMemo(() => (ward ? buildCapAlert(ward, region) : null), [ward, region]);
   if (!alert) return null;
 
   return (

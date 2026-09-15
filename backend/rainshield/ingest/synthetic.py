@@ -13,7 +13,8 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from rainshield.config import LEAD_TIMES, REGION
+from rainshield.config import LEAD_TIMES
+from rainshield.regions import PRIMARY_REGION_ID, get_region
 from rainshield.ingest.base import LiveObservation
 
 
@@ -22,16 +23,18 @@ class SyntheticProvider:
 
     name = "synthetic"
 
-    def __init__(self, intensity: float = 1.0):
+    def __init__(self, intensity: float = 1.0, region_id: str = PRIMARY_REGION_ID):
         self.intensity = intensity
+        self.region_id = region_id
 
     def fetch(self, reason: str | None = None) -> LiveObservation:
         now = datetime.now(timezone.utc)
+        region = get_region(self.region_id).geometry
         # One slow cycle per 6 hours keeps the demo visibly moving.
         phase = ((now.hour * 60 + now.minute) % 360) / 360.0
 
-        rows = np.arange(REGION.rows)[:, None] / REGION.rows
-        cols = np.arange(REGION.cols)[None, :] / REGION.cols
+        rows = np.arange(region.rows)[:, None] / region.rows
+        cols = np.arange(region.cols)[None, :] / region.cols
 
         def field(lead: int) -> np.ndarray:
             hours = lead / 60.0
@@ -61,6 +64,8 @@ class SyntheticProvider:
             antecedent_24h=(base * 3.5).astype(np.float32),
             degraded=True,
             notes=notes,
+            region_id=self.region_id,
+            simulated=True,
         )
         observation.validate()
         return observation

@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { API_BASE } from '@/lib/config';
 import { DashboardProvider, useDashboard } from '@/hooks/useDashboard';
 import { Header } from '@/components/layout/Header';
+import { SimulatedBanner } from '@/components/layout/SimulatedBanner';
 import { StatusBar } from '@/components/layout/StatusBar';
-import { AlertsView, DashboardView, MapView, RiskView, WardsView } from '@/views';
+import { AlertsView, DashboardView, FeedView, MapView, RiskView, WardsView } from '@/views';
 import type { ViewId } from '@/views';
 
 const VIEW_COMPONENTS: Record<ViewId, () => JSX.Element> = {
@@ -12,6 +13,7 @@ const VIEW_COMPONENTS: Record<ViewId, () => JSX.Element> = {
   risk: RiskView,
   wards: WardsView,
   alerts: AlertsView,
+  feed: FeedView,
 };
 
 export default function App() {
@@ -40,7 +42,7 @@ export default function App() {
  * Both need to be said plainly rather than rendered as a grid of zeroes.
  */
 function Board({ view }: { view: ViewId }) {
-  const { isLoading, error, refresh } = useDashboard();
+  const { isLoading, error, refresh, region, storm } = useDashboard();
   const View = VIEW_COMPONENTS[view];
 
   if (error) {
@@ -73,6 +75,19 @@ function Board({ view }: { view: ViewId }) {
           Pulling current observations and scoring the 1 km grid.
         </p>
       </Notice>
+    );
+  }
+
+  // The feed view carries its own banner with the full blurb; everywhere else
+  // gets the compact one, so a simulated region is never unlabelled.
+  if (region?.simulated && view !== 'feed') {
+    return (
+      <div className="flex h-full min-h-0 flex-col gap-3">
+        <SimulatedBanner storm={storm} compact />
+        <div className="min-h-0 flex-1">
+          <View />
+        </div>
+      </div>
     );
   }
 

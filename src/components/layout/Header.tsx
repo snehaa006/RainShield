@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { REGION } from '@/lib/config';
 import { useDashboard } from '@/hooks/useDashboard';
 import { TierBadge } from '@/components/ui/TierBadge';
 import type { ViewId } from '@/views';
@@ -12,7 +11,8 @@ interface HeaderProps {
 
 /** Product title, primary view tabs and live status. */
 export function Header({ view, onViewChange }: HeaderProps) {
-  const { regionSummary, feed, isUpdating, refresh } = useDashboard();
+  const { regionSummary, feed, isUpdating, refresh, region, regions, regionId, setRegionId } =
+    useDashboard();
 
   return (
     <header className="shrink-0 border-b border-surface-border bg-surface-deep">
@@ -22,9 +22,28 @@ export function Header({ view, onViewChange }: HeaderProps) {
             RainShield AI
           </h1>
           <p className="text-[11px] text-slate-500">
-            Flood early warning · {REGION.name}, {REGION.state}
+            Flood early warning · {region ? `${region.name}, ${region.state}` : 'loading region…'}
           </p>
         </div>
+
+        {regions.length > 1 && (
+          <label className="flex shrink-0 items-center gap-2 text-[11px] text-slate-500">
+            <span className="sr-only">Region</span>
+            <select
+              value={regionId}
+              onChange={(event) => setRegionId(event.target.value)}
+              className="rounded-[10px] border border-surface-border bg-white/[0.04] px-2.5 py-1.5
+                text-[12px] text-slate-200 outline-none transition-colors hover:bg-white/[0.08]
+                focus:border-accent"
+            >
+              {regions.map((item) => (
+                <option key={item.id} value={item.id} className="bg-surface-deep text-slate-200">
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
 
         <nav className="order-last flex w-full items-center gap-1 overflow-x-auto scroll-thin
           lg:order-none lg:w-auto lg:flex-1 lg:justify-center">
@@ -71,7 +90,7 @@ export function Header({ view, onViewChange }: HeaderProps) {
             />
             {isUpdating ? 'Updating' : 'Live'}
           </button>
-          <Clock />
+          <Clock timezone={region?.timezone} />
           <TierBadge tier={regionSummary.tier} size="md" pulse={regionSummary.tier !== 'NORMAL'} />
         </div>
       </div>
@@ -79,8 +98,15 @@ export function Header({ view, onViewChange }: HeaderProps) {
   );
 }
 
-/** Live wall-clock readout. */
-function Clock() {
+/**
+ * Wall-clock readout in the *region's* zone.
+ *
+ * This used to render the browser's local time and label it IST regardless of
+ * where the browser actually was, so an operator outside India read a time that
+ * was hours off under a label saying otherwise. Formatting explicitly in the
+ * region's zone makes the label true, and shows the zone it is true for.
+ */
+function Clock({ timezone }: { timezone?: string }) {
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -88,13 +114,25 @@ function Clock() {
     return () => window.clearInterval(id);
   }, []);
 
+  const zone = timezone ?? 'Asia/Kolkata';
+  const time = now.toLocaleTimeString('en-GB', { hour12: false, timeZone: zone });
+  const date = now.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: zone,
+  });
+  // "GMT+5:30" is what Intl gives without a short name; either is honest.
+  const label =
+    new Intl.DateTimeFormat('en-GB', { timeZone: zone, timeZoneName: 'short' })
+      .formatToParts(now)
+      .find((part) => part.type === 'timeZoneName')?.value ?? zone;
+
   return (
-    <div className="hidden text-right md:block">
-      <p className="text-[13px] font-semibold leading-none tabular-nums text-white">
-        {now.toLocaleTimeString('en-GB', { hour12: false })}
-      </p>
+    <div className="hidden text-right md:block" title={zone}>
+      <p className="text-[13px] font-semibold leading-none tabular-nums text-white">{time}</p>
       <p className="mt-0.5 text-[10px] text-slate-500">
-        {now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })} IST
+        {date} {label}
       </p>
     </div>
   );
