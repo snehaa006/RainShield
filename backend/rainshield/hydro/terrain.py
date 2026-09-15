@@ -103,6 +103,9 @@ class DrainageTerrain:
     filled: np.ndarray
     #: filled - elevation, m. The depth a basin ponds to before it spills.
     fill_depth: np.ndarray
+    #: The surface D8 was actually routed on: `filled` plus a negligible tilt
+    #: across flats. Never use it as an elevation — see `fill_depressions`.
+    routing: np.ndarray
     #: Flat index of the downslope neighbour, or -1 for sea and true outlets.
     downstream: np.ndarray
     #: Number of upslope cells draining through each cell, including itself.
@@ -181,13 +184,32 @@ def sea_mask(elevation: np.ndarray, sea_level: float = SEA_LEVEL_M) -> np.ndarra
     return sea
 
 
-def fill_depressions(elevation: np.ndarray, sea: np.ndarray) -> np.ndarray:
+#: Gradient imposed across filled flats so D8 has a direction to follow, m.
+#: Small enough that 1755 cells of it accumulate to under 2 cm, which is far
+#: below the DEM's own vertical error.
+ROUTING_EPSILON_M = 1e-5
+
+
+def fill_depressions(
+    elevation: np.ndarray, sea: np.ndarray, epsilon: float = 0.0
+) -> np.ndarray:
     """Priority-flood depression filling, seeded from the sea and the border.
 
     Every cell is raised to the highest water level it would have to reach to
-    escape, which is the running maximum along the cheapest path out. The
-    result is hydrologically conditioned: no interior cell is a local minimum,
-    so D8 always finds a way downhill.
+    escape, which is the running maximum along the cheapest path out.
+
+    With `epsilon` at zero this is the physical surface: a filled depression
+    becomes a level pool, and `filled - elevation` is the real volume that pool
+    holds. That surface cannot be routed on, though, because a level pool has
+    no downhill direction anywhere in it and D8 stalls — on the Mumbai grid,
+    676 cells terminated in an interior flat rather than reaching the coast.
+
+    A positive `epsilon` tilts each filled cell fractionally above the one it
+    escaped through, in flood order, which guarantees every cell a downhill
+    neighbour. That surface is for routing only. The two are kept separate
+    rather than reconciled: the physical fill depth feeds depression storage,
+    where a spurious tilt would be a real error, and the routing surface feeds
+    D8, where a level pool would be.
     """
     rows, cols = elevation.shape
     filled = elevation.astype(np.float64).copy()
@@ -213,12 +235,15 @@ def fill_depressions(elevation: np.ndarray, sea: np.ndarray) -> np.ndarray:
             if not (0 <= nr < rows and 0 <= nc < cols) or closed[nr, nc]:
                 continue
             # To leave, this neighbour's water must at least reach `level`.
-            if filled[nr, nc] < level:
-                filled[nr, nc] = level
+            # With epsilon set, it must clear it, so that the escape route is
+            # always strictly downhill and D8 can follow it off a flat.
+            floor = level + epsilon
+            if filled[nr, nc] < floor:
+                filled[nr, nc] = floor
             closed[nr, nc] = True
             heapq.heappush(heap, (float(filled[nr, nc]), nr, nc))
 
-    return filled.astype(np.float32)
+    return filled.astype(np.float64)
 
 
 def d8_downstream(filled: np.ndarray, sea: np.ndarray) -> np.ndarray:
@@ -323,7 +348,8 @@ def design_service_cells(station: PumpStation, cell_area_m2: float) -> int:
     station that exists drains *something*, and rounding it to zero would
     silently drop it from the assessment.
     """
-    design_area_m2 = station.capacity_cumecs / (DESIGN_INTENSITY_MM_HR / 1000.0 / 3600.0)
+    intensity = station.design_intensity_mm_hr or DESIGN_INTENSITY_MM_HR
+    design_area_m2 = station.capacity_cumecs / (intensity / 1000.0 / 3600.0)
     return max(1, int(round(design_area_m2 / cell_area_m2)))
 
 
@@ -412,7 +438,8 @@ def drainage_terrain(region_id: str = PRIMARY_REGION_ID) -> DrainageTerrain:
 
     sea = sea_mask(elevation)
     filled = fill_depressions(elevation, sea)
-    downstream = d8_downstream(filled, sea)
+    routing = fill_depressions(elevation, sea, epsilon=ROUTING_EPSILON_M)
+    downstream = d8_downstream(routing, sea)
     outlet = trace_outlets(downstream, sea)
     accumulation = flow_accumulation(downstream, sea).reshape(elevation.shape)
     area = cell_area_m2(region_id)
@@ -427,6 +454,7 @@ def drainage_terrain(region_id: str = PRIMARY_REGION_ID) -> DrainageTerrain:
         elevation=elevation,
         filled=filled,
         fill_depth=(filled - elevation).astype(np.float32),
+        routing=routing,
         downstream=downstream,
         accumulation=accumulation.astype(np.float32),
         outlet=outlet,

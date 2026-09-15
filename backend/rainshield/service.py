@@ -21,7 +21,15 @@ from rainshield.grid import (
     ward_assignment,
     wards_for,
 )
-from rainshield.hazard import HazardField, WhatIf, compute_hazard, confidence_for
+from rainshield.hazard import (
+    DEFAULT_WHAT_IF,
+    HazardField,
+    WhatIf,
+    compute_hazard,
+    confidence_for,
+)
+from rainshield.hydro import assess_drainage, drainage_terrain
+from rainshield.hydro.stations import PUMP_UNIT_CUMECS
 from rainshield.ingest import cadence_for, feed_log, get_observation, storm_phase
 from rainshield.ingest.base import (
     LiveObservation,
@@ -493,4 +501,152 @@ def cell_series_payload(
         "region": region_descriptor(region_id),
         "observation": observation_meta(observation),
         "series": points,
+    }
+
+
+# --------------------------------------------------------------------------
+# Drainage and pumping — Stage A
+# --------------------------------------------------------------------------
+
+
+def _station_payload(station) -> dict:
+    """One pumping station, with its capacity's provenance attached.
+
+    `capacityBasis` travels with every capacity figure deliberately: these are
+    assembled estimates, and a number that reaches the dashboard without the
+    caveat attached is a number that will eventually be quoted as fact.
+    """
+    return {
+        "id": station.id,
+        "name": station.name,
+        "lon": station.lon,
+        "lat": station.lat,
+        "pumps": station.pumps,
+        "capacityCumecs": round(station.capacity_cumecs, 2),
+        "unitCumecs": round(station.unit_cumecs, 2),
+        "gravityCumecs": round(station.gravity_cumecs, 2),
+        "outfallInvertMCd": round(station.outfall_invert_m_cd, 2),
+        "commissioned": station.commissioned,
+        "capacityBasis": station.capacity_basis,
+        "generated": station.generated,
+    }
+
+
+def _catchment_payload(balance) -> dict:
+    return {
+        "id": balance.id,
+        "name": balance.name,
+        "stationId": balance.station.id if balance.station else None,
+        "areaKm2": round(balance.area_km2, 2),
+        "cellCount": balance.cell_count,
+        "rainfallMmHr": round(balance.rainfall_mm_hr, 2),
+        "infiltrationMmHr": round(balance.infiltration_mm_hr, 2),
+        "netRunoffMmHr": round(balance.net_runoff_mm_hr, 2),
+        "capacityMmHr": round(balance.capacity_mm_hr, 1),
+        "openGateCapacityMmHr": round(balance.open_gate_capacity_mm_hr, 1),
+        "inflowCumecs": round(balance.inflow_cumecs, 2),
+        "gravityCumecs": round(balance.gravity_cumecs, 2),
+        "pumpCumecs": round(balance.pump_cumecs, 2),
+        "supplyCumecs": round(balance.supply_cumecs, 2),
+        "deficitCumecs": round(balance.deficit_cumecs, 2),
+        "extraPumpsRequired": balance.extra_pumps_required,
+        "sufficient": balance.sufficient,
+        "gateClosed": balance.gate_closed,
+        "supplyModelled": balance.supply_modelled,
+    }
+
+
+def _tide_payload(tide) -> dict:
+    regime = tide.regime
+    return {
+        "levelMCd": round(tide.level_m, 3),
+        "rateMPerHr": round(tide.rate_m_per_hr, 3),
+        "normalised": round(tide.normalised, 3),
+        "phase": tide.phase,
+        "rising": tide.is_rising,
+        "validAt": tide.valid_at.isoformat(),
+        "meanSeaLevelMCd": round(regime.mean_sea_level_m, 2),
+        "highestAstronomicalMCd": round(regime.highest_astronomical_tide_m, 2),
+        "lowestAstronomicalMCd": round(regime.lowest_astronomical_tide_m, 2),
+        "springRangeM": round(regime.spring_range_m, 2),
+        "basis": regime.basis,
+    }
+
+
+def drainage_payload(
+    lead: int = 0,
+    what_if: WhatIf = DEFAULT_WHAT_IF,
+    region_id: str = PRIMARY_REGION_ID,
+    tide_override_m: float | None = None,
+    pump_availability: float = 1.0,
+) -> dict:
+    """Stage A drainage assessment at one lead time.
+
+    The rain driving it is the instantaneous rate rather than the 3-hour
+    accumulation, because the question is whether the system keeps up with
+    what is falling. The what-if sliders apply the same way they do to the
+    hazard model, so the two panels stay consistent with each other: extra
+    rainfall is spread over the 3-hour window to give a rate, and drainage
+    capacity scales the pumps rather than the rain.
+    """
+    if lead not in LEAD_TIMES:
+        raise ValueError(f"lead must be one of {list(LEAD_TIMES)}")
+
+    observation = get_observation(region_id=region_id)
+    rain = np.clip(
+        observation.rain_rate[lead] + what_if.extra_rainfall / 3.0, 0.0, None
+    )
+    soil = np.clip(observation.soil_moisture * what_if.soil_saturation, 0.0, None)
+    availability = pump_availability * float(
+        np.clip(what_if.drainage_capacity, 0.3, 1.2)
+    )
+
+    assessment = assess_drainage(
+        rain,
+        soil,
+        lead=lead,
+        region_id=region_id,
+        tide_override_m=tide_override_m,
+        pump_availability=availability,
+    )
+    terrain = drainage_terrain(region_id)
+
+    return {
+        "lead": lead,
+        "region": region_descriptor(region_id),
+        "observation": observation_meta(observation),
+        "isSimulating": what_if.is_active() or tide_override_m is not None,
+        "tide": _tide_payload(assessment.tide),
+        "tideOverridden": tide_override_m is not None,
+        "stations": [_station_payload(s) for s in terrain.stations],
+        "catchments": [_catchment_payload(b) for b in assessment.catchments],
+        "unpumped": (
+            _catchment_payload(assessment.unpumped) if assessment.unpumped else None
+        ),
+        "totals": {
+            "inflowCumecs": round(assessment.total_inflow_cumecs, 2),
+            "supplyCumecs": round(assessment.total_supply_cumecs, 2),
+            "deficitCumecs": round(assessment.total_deficit_cumecs, 2),
+            "extraPumpsRequired": assessment.total_extra_pumps,
+            "installedPumpCumecs": round(assessment.installed_pump_cumecs, 2),
+            "catchmentsInDeficit": assessment.catchments_in_deficit,
+            "catchmentCount": len(assessment.catchments),
+            "sufficient": assessment.sufficient,
+            "pumpUnitCumecs": PUMP_UNIT_CUMECS,
+            "designIntensityMmHr": assessment.design_intensity_mm_hr,
+        },
+        #: Per-cell catchment index, so the map can shade service areas.
+        #: -1 means no modelled station drains this cell.
+        "cells": {
+            "catchment": [int(v) for v in terrain.catchment.ravel()],
+            "sea": [bool(v) for v in terrain.sea.ravel()],
+        },
+        "caveat": (
+            "Catchment-scale, not street-scale. Pumped service areas are sized "
+            f"from installed capacity at the {assessment.design_intensity_mm_hr:.0f} "
+            "mm/hr design standard, not delineated from the drain network — an "
+            "engineered catchment is smaller than this grid's 1 km cell. Pump "
+            "capacities, outfall invert levels, infiltration rates and tidal "
+            "constants are all uncalibrated estimates. Defensible, not validated."
+        ),
     }

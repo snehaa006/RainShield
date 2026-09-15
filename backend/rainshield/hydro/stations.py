@@ -21,7 +21,18 @@ commonly named in BMC reporting on the programme.
     below are inferred from the requirement that these outfalls tide-lock
     around high water, which is the condition that motivated the pumps.
 
-A simulated region gets generated stations, labelled as such.
+A simulated region gets generated stations, labelled as such. Theirs are given
+a 25 mm/hr standard rather than 50 — an un-upgraded network — so that the
+deficit path is actually exercised by the storm that region runs.
+
+One structural consequence is worth stating plainly, because it bounds what
+this model can conclude. Service areas are *derived from* capacity, so every
+station is by construction sized correctly for its own design standard, give
+or take rounding to whole cells. This model therefore cannot discover that a
+station is under-built relative to what it was designed for — no such finding
+would be real. What it can say is whether the rain exceeds the design standard,
+and how much of the margin the tide takes away. Those are the two questions
+that matter operationally, and both are answered honestly.
 """
 
 from __future__ import annotations
@@ -36,7 +47,8 @@ from rainshield.regions import PRIMARY_REGION_ID, get_region
 #: abstract volume.
 PUMP_UNIT_CUMECS = 6.0
 
-#: Rainfall intensity the drainage network is designed to clear, mm/hr.
+#: Default rainfall intensity the drainage network is designed to clear,
+#: mm/hr; a station may override it.
 #: BRIMSTOWAD's central recommendation was to rebuild Mumbai's drains to a
 #: 50 mm/hr standard, up from the ~25 mm/hr colonial-era network that failed in
 #: 2005. It is used here to *size* each station's service area: a station's
@@ -65,6 +77,11 @@ class PumpStation:
     #: Year the station was commissioned, where reported.
     commissioned: int | None
     capacity_basis: str
+    #: The rainfall intensity this station's network was built to clear,
+    #: mm/hr. Sets the service area: capacity / intensity is the area it
+    #: drains. A lower standard means the same pumps cover more ground and
+    #: therefore fail sooner, which is what an un-upgraded network looks like.
+    design_intensity_mm_hr: float = DESIGN_INTENSITY_MM_HR
     #: True when the station is invented along with its region.
     generated: bool = False
 
@@ -129,19 +146,19 @@ SIMULATED_STATIONS: tuple[PumpStation, ...] = (
         id="sim-harbour", name="Harbour Front Pumping Station", lon=80.330, lat=12.912,
         pumps=4, capacity_cumecs=24.0, outfall_invert_m_cd=1.0,
         gravity_cumecs=18.0, commissioned=2012, capacity_basis=_GENERATED_BASIS,
-        generated=True,
+        design_intensity_mm_hr=25.0, generated=True,
     ),
     PumpStation(
         id="sim-estuary", name="Estuary Town Pumping Station", lon=80.324, lat=13.046,
         pumps=3, capacity_cumecs=18.0, outfall_invert_m_cd=0.9,
         gravity_cumecs=14.0, commissioned=2017, capacity_basis=_GENERATED_BASIS,
-        generated=True,
+        design_intensity_mm_hr=25.0, generated=True,
     ),
     PumpStation(
         id="sim-northport", name="North Port Pumping Station", lon=80.332, lat=13.150,
         pumps=2, capacity_cumecs=12.0, outfall_invert_m_cd=1.1,
         gravity_cumecs=10.0, commissioned=2020, capacity_basis=_GENERATED_BASIS,
-        generated=True,
+        design_intensity_mm_hr=25.0, generated=True,
     ),
 )
 

@@ -94,3 +94,111 @@ def test_ward_rollup_is_ranked_and_complete(client):
 
     assert [w["risk"] for w in wards] == sorted((w["risk"] for w in wards), reverse=True)
     assert sum(w["cellCount"] for w in wards) == CELL_COUNT
+
+
+# --------------------------------------------------------------------------
+# Drainage and pumping
+# --------------------------------------------------------------------------
+
+
+def test_drainage_reports_catchments_stations_and_tide(client):
+    body = client.get("/api/drainage?lead=60").json()
+
+    assert body["lead"] == 60
+    assert len(body["stations"]) == 7
+    assert len(body["catchments"]) == 7
+    assert len(body["cells"]["catchment"]) == CELL_COUNT
+    assert len(body["cells"]["sea"]) == CELL_COUNT
+
+    tide = body["tide"]
+    assert tide["lowestAstronomicalMCd"] <= tide["levelMCd"] <= tide["highestAstronomicalMCd"]
+    assert tide["phase"] in {"high", "low", "flooding", "ebbing"}
+
+    totals = body["totals"]
+    assert totals["catchmentCount"] == 7
+    assert totals["installedPumpCumecs"] == pytest.approx(180.0)
+    assert totals["pumpUnitCumecs"] == 6.0
+
+
+def test_drainage_rejects_an_unknown_lead(client):
+    assert client.get("/api/drainage?lead=7").status_code == 422
+
+
+def test_drainage_rejects_an_unknown_region(client):
+    assert client.get("/api/drainage?region=atlantis").status_code == 404
+
+
+def test_drainage_rejects_an_impossible_tide(client):
+    assert client.get("/api/drainage?tide=99").status_code == 422
+
+
+def test_drainage_tide_override_is_flagged(client):
+    pinned = client.get("/api/drainage?tide=4.5").json()
+    assert pinned["tideOverridden"] is True
+    assert pinned["tide"]["levelMCd"] == pytest.approx(4.5)
+    assert pinned["isSimulating"] is True
+
+    natural = client.get("/api/drainage").json()
+    assert natural["tideOverridden"] is False
+
+
+def test_drainage_high_tide_shuts_the_gates(client):
+    low = client.get("/api/drainage?tide=0.5").json()
+    high = client.get("/api/drainage?tide=4.5").json()
+
+    assert all(not c["gateClosed"] for c in low["catchments"])
+    assert all(c["gateClosed"] for c in high["catchments"])
+    assert low["totals"]["supplyCumecs"] > high["totals"]["supplyCumecs"]
+    # With every gate shut, supply is the pumps alone.
+    assert high["totals"]["supplyCumecs"] == pytest.approx(
+        high["totals"]["installedPumpCumecs"]
+    )
+
+
+def test_drainage_extra_rainfall_raises_the_deficit(client):
+    dry = client.get("/api/drainage?tide=4.5").json()["totals"]
+    wet = client.get("/api/drainage?tide=4.5&extra_rainfall=250").json()["totals"]
+    assert wet["inflowCumecs"] > dry["inflowCumecs"]
+    assert wet["deficitCumecs"] >= dry["deficitCumecs"]
+    assert wet["extraPumpsRequired"] >= dry["extraPumpsRequired"]
+
+
+def test_drainage_losing_pumps_cuts_supply(client):
+    full = client.get("/api/drainage").json()["totals"]
+    none = client.get("/api/drainage?pump_availability=0").json()["totals"]
+    assert none["supplyCumecs"] < full["supplyCumecs"]
+
+
+def test_drainage_unpumped_area_claims_no_capacity(client):
+    body = client.get("/api/drainage").json()
+    unpumped = body["unpumped"]
+    assert unpumped is not None
+    assert unpumped["supplyModelled"] is False
+    assert unpumped["areaKm2"] > 0
+    assert unpumped["stationId"] is None
+    # It is reported, but never folded into the headline numbers.
+    assert all(c["id"] != unpumped["id"] for c in body["catchments"])
+
+
+def test_drainage_capacity_figures_carry_their_caveat(client):
+    body = client.get("/api/drainage").json()
+    assert "estimate" in body["caveat"].lower()
+    for station in body["stations"]:
+        assert station["capacityBasis"]
+        assert "ESTIMATE" in station["capacityBasis"]
+
+
+def test_drainage_works_for_the_simulated_region(client):
+    body = client.get("/api/drainage?region=coromandel").json()
+    assert body["region"]["simulated"] is True
+    assert len(body["stations"]) == 3
+    assert all(s["generated"] for s in body["stations"])
+    assert all("GENERATED" in s["capacityBasis"] for s in body["stations"])
+
+
+def test_drainage_does_not_disturb_the_hazard_model(client):
+    """Stage A is additive: the forecast must be byte-identical either side."""
+    before = client.get("/api/forecast?lead=60").json()["cells"]
+    client.get("/api/drainage?lead=60&tide=4.5&extra_rainfall=200")
+    after = client.get("/api/forecast?lead=60").json()["cells"]
+    assert before == after
