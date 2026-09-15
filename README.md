@@ -25,10 +25,17 @@ one is labelled — see [Regions](#regions).
 Two processes. The backend first:
 
 ```bash
-cd backend
-pip install -r requirements.txt
-uvicorn rainshield.api.app:app --reload --port 8000     # http://localhost:8000/docs
+pip install -r backend/requirements.txt
+uvicorn rainshield.api.app:app --app-dir backend --reload --port 8000
+# http://localhost:8000/docs
 ```
+
+Run it from the **repository root**, not from `backend/`. `--app-dir` is what
+puts the package on the import path; `cd backend` and omitting it fails with
+`Error loading ASGI app. Could not import module "rainshield.api.app"`, which
+is what this said to do until it was actually tried. The same invocation is
+what the Render blueprint and the Dockerfile use, so there is one command to
+get right rather than three.
 
 Then the dashboard, which proxies `/api` and `/health` to port 8000 in dev:
 
