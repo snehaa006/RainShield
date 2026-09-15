@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { EmergencyAlertOverlay } from '@/components/alerts/EmergencyAlertOverlay';
+import { AlertSystemProvider, useAlertSystem } from '@/hooks/useAlertSystem';
 import { API_BASE } from '@/lib/config';
 import { DashboardProvider, useDashboard } from '@/hooks/useDashboard';
 import { Header } from '@/components/layout/Header';
@@ -17,20 +19,68 @@ const VIEW_COMPONENTS: Record<ViewId, () => JSX.Element> = {
 };
 
 export default function App() {
-  const [view, setView] = useState<ViewId>('dashboard');
-
   return (
     <DashboardProvider>
-      <div className="flex h-full flex-col">
-        <Header view={view} onViewChange={setView} />
-
-        <main className="min-h-0 flex-1 overflow-y-auto p-3 scroll-thin xl:overflow-hidden">
-          <Board view={view} />
-        </main>
-
-        <StatusBar />
-      </div>
+      <AlertSystemProvider>
+        <AppShell />
+      </AlertSystemProvider>
     </DashboardProvider>
+  );
+}
+
+function AppShell() {
+  const [view, setView] = useState<ViewId>('dashboard');
+  const { newEvent, activeEvent, clearNewEvent, enableAudio, audioEnabled, muted, setMuted } = useAlertSystem();
+  const { selectWard } = useDashboard();
+
+  const reviewEvent = () => {
+    if (!newEvent) return;
+    selectWard(newEvent.ward.ward.id);
+    setView('alerts');
+    clearNewEvent();
+  };
+
+  return (
+    <div className="flex h-full flex-col">
+      <Header view={view} onViewChange={setView} />
+
+      {!activeEvent && !audioEnabled && (
+        <div className="shrink-0 border-b border-white/10 bg-white/[0.02] px-4 py-1.5">
+          <div className="mx-auto flex max-w-[1800px] items-center justify-between gap-3">
+            <p className="text-[10px] text-slate-500">Alert engine armed · enable audio so critical events can sound an alarm.</p>
+            <button className="btn !px-2.5 !py-1.5 text-[10px]" onClick={() => void enableAudio()}>🔊 Arm alert audio</button>
+          </div>
+        </div>
+      )}
+
+      {activeEvent && (
+        <div className="critical-command-banner shrink-0 border-b border-tier-critical/30 bg-tier-critical/[0.08] px-4 py-2">
+          <div className="mx-auto flex max-w-[1800px] items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="h-2.5 w-2.5 shrink-0 animate-soft-pulse rounded-full bg-tier-critical" />
+              <p className="truncate text-[11px] font-bold uppercase tracking-wider text-tier-critical">
+                Critical event · {activeEvent.ward.ward.name} · {activeEvent.status.replace('_', ' ')}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {!audioEnabled && <button className="btn !border-tier-critical/30 !text-tier-critical" onClick={() => void enableAudio()}>Enable alert audio</button>}
+              {audioEnabled && <button className="btn" onClick={() => setMuted(!muted)}>{muted ? 'Unmute alarm' : 'Mute alarm'}</button>}
+              <button className="btn btn-accent" onClick={() => { selectWard(activeEvent.ward.ward.id); setView('alerts'); }}>Open incident</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <main className="min-h-0 flex-1 overflow-y-auto p-3 scroll-thin xl:overflow-hidden">
+        <Board view={view} />
+      </main>
+
+      <StatusBar />
+
+      {newEvent && (
+        <EmergencyAlertOverlay event={newEvent} onReview={reviewEvent} onDismiss={clearNewEvent} />
+      )}
+    </div>
   );
 }
 

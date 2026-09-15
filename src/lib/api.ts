@@ -285,3 +285,37 @@ export async function refreshFeed(region?: string): Promise<void> {
   const response = await fetch(url, { method: 'POST' });
   if (!response.ok) throw new ApiError(`Refresh failed (HTTP ${response.status})`, response.status);
 }
+
+/** Operational alert endpoints. The backend owns alert lifecycle state. */
+export interface AlertApiRecord {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  status: 'UNDER_REVIEW' | 'APPROVED' | 'BROADCASTING' | 'ACTIVE' | 'RESOLVED' | 'CANCELLED';
+  tier: AlertTier;
+  region: RegionDescriptor;
+  ward: WardRollup;
+  reason: string[];
+  channels: Record<string, number>;
+  simulation: boolean;
+}
+
+export const fetchAlerts = (region?: string, signal?: AbortSignal) =>
+  request<{ alerts: AlertApiRecord[] }>('/api/alerts', regionParam(region), signal);
+
+async function alertAction(alertId: string, action: 'approve' | 'broadcast' | 'resolve' | 'cancel') {
+  const response = await fetch(`${API_BASE}/api/alerts/${encodeURIComponent(alertId)}/${action}`, {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null);
+    throw new ApiError(detail?.detail ?? `Alert ${action} failed (HTTP ${response.status})`, response.status);
+  }
+  return response.json() as Promise<AlertApiRecord>;
+}
+
+export const approveAlert = (alertId: string) => alertAction(alertId, 'approve');
+export const broadcastAlert = (alertId: string) => alertAction(alertId, 'broadcast');
+export const resolveAlert = (alertId: string) => alertAction(alertId, 'resolve');
+export const cancelAlert = (alertId: string) => alertAction(alertId, 'cancel');

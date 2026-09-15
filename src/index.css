@@ -122,3 +122,39 @@
 .maplibregl-ctrl-attrib a {
   @apply text-slate-400;
 }
+
+/* ------------------------------------------------ emergency alert system --- */
+.critical-command-banner {
+  animation: critical-banner-in 180ms ease-out;
+}
+
+.emergency-overlay {
+  animation: emergency-in 220ms cubic-bezier(.2,.8,.2,1);
+}
+
+.critical-stripe {
+  height: 4px;
+  background: linear-gradient(90deg, transparent, #ff453a 15%, #ff453a 85%, transparent);
+  animation: critical-stripe-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes critical-banner-in {
+  from { transform: translateY(-8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes emergency-in {
+  from { transform: translateY(12px) scale(.985); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+@keyframes critical-stripe-pulse {
+  0%, 100% { opacity: .55; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .critical-command-banner,
+  .emergency-overlay,
+  .critical-stripe { animation: none; }
+}

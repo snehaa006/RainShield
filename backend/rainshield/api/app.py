@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from rainshield.config import LEAD_TIMES, SETTINGS
+from rainshield.alerting import audit_log, evaluate_forecast, get_alert, list_alerts, transition
 from rainshield.hazard import WhatIf
 from rainshield.ingest import (
     clear_cache,
@@ -120,6 +121,8 @@ def root() -> dict:
             "/api/forecast",
             "/api/series",
             "/api/cell/{row}/{col}",
+            "/api/alerts",
+            "/api/audit",
         ],
     }
 
@@ -187,7 +190,10 @@ def forecast(
     region_id = _resolve_region(region)
     settings = WhatIf(extra_rainfall, soil_saturation, drainage_capacity)
     try:
-        return forecast_payload(lead, settings, force_refresh=refresh, region_id=region_id)
+        payload = forecast_payload(lead, settings, force_refresh=refresh, region_id=region_id)
+        # Automatic alerting: the risk engine, not the UI, owns detection.
+        evaluate_forecast(payload)
+        return payload
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except FileNotFoundError as exc:
@@ -235,3 +241,55 @@ def refresh(region: str = RegionQuery) -> dict:
     clear_cache(region_id)
     fresh = get_observation(force_refresh=True, region_id=region_id)
     return {"refreshed": True, "observation": observation_meta(fresh)}
+
+
+@app.get("/api/alerts", tags=["alerts"])
+def alerts(region: str = RegionQuery) -> dict:
+    region_id = _resolve_region(region)
+    return {"alerts": list_alerts(region_id)}
+
+
+@app.get("/api/alerts/{alert_id}", tags=["alerts"])
+def alert(alert_id: str) -> dict:
+    value = get_alert(alert_id)
+    if value is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return value
+
+
+def _transition_alert(alert_id: str, status: str) -> dict:
+    try:
+        return transition(alert_id, status)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Alert not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/alerts/{alert_id}/approve", tags=["alerts"])
+def approve_alert(alert_id: str) -> dict:
+    return _transition_alert(alert_id, "APPROVED")
+
+
+@app.post("/api/alerts/{alert_id}/broadcast", tags=["alerts"])
+def broadcast_alert(alert_id: str) -> dict:
+    _transition_alert(alert_id, "BROADCASTING")
+    # The prototype simulates channel delivery; production should enqueue a
+    # signed CAP message into the authority/telecom gateways and only move to
+    # ACTIVE once the gateways acknowledge.
+    return _transition_alert(alert_id, "ACTIVE")
+
+
+@app.post("/api/alerts/{alert_id}/resolve", tags=["alerts"])
+def resolve_alert(alert_id: str) -> dict:
+    return _transition_alert(alert_id, "RESOLVED")
+
+
+@app.post("/api/alerts/{alert_id}/cancel", tags=["alerts"])
+def cancel_alert(alert_id: str) -> dict:
+    return _transition_alert(alert_id, "CANCELLED")
+
+
+@app.get("/api/audit", tags=["alerts"])
+def audit() -> dict:
+    return {"events": audit_log()}

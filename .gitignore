@@ -11,3 +11,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+
+# Local archives (a backend/.venv zip was committed by accident once)
+*.zip
