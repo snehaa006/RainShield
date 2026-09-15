@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useDashboard } from '@/hooks/useDashboard';
 import { buildCapAlert } from '@/lib/cap';
 import { approveAlert, broadcastAlert, cancelAlert, fetchAlerts, resolveAlert } from '@/lib/api';
@@ -18,17 +19,34 @@ export interface AlertEvent {
 }
 
 /**
- * The frontend does NOT decide whether an alert exists.
- * FastAPI evaluates every forecast and stores the alert lifecycle. This hook
- * polls that source of truth and turns newly-created records into UI events.
- *
- * This fixes an important V2 issue: AppShell and AlertsView each mounted their
- * own local alert state, so an alert created by the backend was invisible to
- * the event stream. The backend is now the shared source of truth.
+ * The lifecycle transitions an operator can request. These are named after the
+ * backend endpoint they call, not after the status the alert ends up in:
+ * `BROADCASTING` lands on ACTIVE server-side once the channels are dispatched.
+ * Keeping the map explicit means an unhandled value is a compile error rather
+ * than silently falling through to a cancel.
  */
+const ALERT_ACTIONS = {
+  APPROVED: approveAlert,
+  BROADCASTING: broadcastAlert,
+  RESOLVED: resolveAlert,
+  CANCELLED: cancelAlert,
+} as const;
+
+export type AlertAction = keyof typeof ALERT_ACTIONS;
+
 const ALERT_POLL_MS = 2000;
 
-export function useAlertSystem() {
+/**
+ * The frontend does NOT decide whether an alert exists.
+ * FastAPI evaluates every forecast and stores the alert lifecycle. This provider
+ * polls that source of truth and turns newly-created records into UI events.
+ *
+ * It is a provider rather than a plain hook on purpose: AppShell and AlertsView
+ * both consume the alert system, and a bare hook gave each of them its own
+ * poller, its own seen-id set and its own audio state. One provider means one
+ * poll loop and one shared view of the backend's alert store.
+ */
+function useAlertSystemState() {
   const { wardSummaries, region, isUpdating, isSimulating, lead, selectWard } = useDashboard();
   const [events, setEvents] = useState<AlertEvent[]>([]);
   const [newEvent, setNewEvent] = useState<AlertEvent | null>(null);
@@ -164,39 +182,69 @@ export function useAlertSystem() {
   const clearNewEvent = useCallback(() => setNewEvent(null), []);
 
   const updateStatus = useCallback(
-    (id: string, status: AlertEvent['status']) => {
-      const action =
-        status === 'APPROVED'
-          ? approveAlert
-          : status === 'BROADCASTING'
-            ? broadcastAlert
-            : status === 'RESOLVED'
-              ? resolveAlert
-              : cancelAlert;
-
-      void action(id)
+    (id: string, action: AlertAction) => {
+      // Re-hydrate either way: on success to pick up the new status, on failure
+      // to resynchronise with whatever the backend actually holds.
+      void ALERT_ACTIONS[action](id)
         .then(() => hydrate())
         .catch(() => hydrate());
     },
     [hydrate],
   );
 
-  const activeEvent = events.find((event) => event.status !== 'RESOLVED') ?? null;
-  const criticalEvents = events.filter((event) => event.tier === 'CRITICAL' && event.status !== 'RESOLVED');
+  const activeEvent = useMemo(
+    () => events.find((event) => event.status !== 'RESOLVED') ?? null,
+    [events],
+  );
+  const criticalEvents = useMemo(
+    () => events.filter((event) => event.tier === 'CRITICAL' && event.status !== 'RESOLVED'),
+    [events],
+  );
 
-  return {
-    events,
-    activeEvent,
-    criticalEvents,
-    newEvent,
-    clearNewEvent,
-    updateStatus,
-    audioEnabled,
-    enableAudio,
-    muted,
-    setMuted,
-    isUpdating,
-    isSimulating,
-    lead,
-  };
+  return useMemo(
+    () => ({
+      events,
+      activeEvent,
+      criticalEvents,
+      newEvent,
+      clearNewEvent,
+      updateStatus,
+      audioEnabled,
+      enableAudio,
+      muted,
+      setMuted,
+      isUpdating,
+      isSimulating,
+      lead,
+    }),
+    [
+      events,
+      activeEvent,
+      criticalEvents,
+      newEvent,
+      clearNewEvent,
+      updateStatus,
+      audioEnabled,
+      enableAudio,
+      muted,
+      isUpdating,
+      isSimulating,
+      lead,
+    ],
+  );
+}
+
+type AlertSystemValue = ReturnType<typeof useAlertSystemState>;
+
+const AlertSystemContext = createContext<AlertSystemValue | null>(null);
+
+export function AlertSystemProvider({ children }: { children: ReactNode }) {
+  const value = useAlertSystemState();
+  return <AlertSystemContext.Provider value={value}>{children}</AlertSystemContext.Provider>;
+}
+
+export function useAlertSystem(): AlertSystemValue {
+  const value = useContext(AlertSystemContext);
+  if (!value) throw new Error('useAlertSystem must be used inside <AlertSystemProvider>');
+  return value;
 }

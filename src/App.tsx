@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { EmergencyAlertOverlay } from '@/components/alerts/EmergencyAlertOverlay';
-import { useAlertSystem } from '@/hooks/useAlertSystem';
+import { AlertSystemProvider, useAlertSystem } from '@/hooks/useAlertSystem';
 import { API_BASE } from '@/lib/config';
 import { DashboardProvider, useDashboard } from '@/hooks/useDashboard';
 import { Header } from '@/components/layout/Header';
@@ -21,7 +21,9 @@ const VIEW_COMPONENTS: Record<ViewId, () => JSX.Element> = {
 export default function App() {
   return (
     <DashboardProvider>
-      <AppShell />
+      <AlertSystemProvider>
+        <AppShell />
+      </AlertSystemProvider>
     </DashboardProvider>
   );
 }

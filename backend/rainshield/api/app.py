@@ -273,9 +273,10 @@ def approve_alert(alert_id: str) -> dict:
 
 @app.post("/api/alerts/{alert_id}/broadcast", tags=["alerts"])
 def broadcast_alert(alert_id: str) -> dict:
-    value = _transition_alert(alert_id, "BROADCASTING")
+    _transition_alert(alert_id, "BROADCASTING")
     # The prototype simulates channel delivery; production should enqueue a
-    # signed CAP message into the authority/telecom gateways.
+    # signed CAP message into the authority/telecom gateways and only move to
+    # ACTIVE once the gateways acknowledge.
     return _transition_alert(alert_id, "ACTIVE")
 
 

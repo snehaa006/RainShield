@@ -24,10 +24,11 @@ export function AlertsView() {
   const preview = useMemo(() => previewWard ? buildCapAlert(previewWard, region) : null, [previewWard, region]);
 
   const approve = (id: string) => updateStatus(id, 'APPROVED');
-  const broadcast = (id: string) => {
-    updateStatus(id, 'BROADCASTING');
-    window.setTimeout(() => updateStatus(id, 'ACTIVE'), 900);
-  };
+  // The backend's broadcast endpoint dispatches the channels and lands the
+  // alert on ACTIVE itself, so this is a single call; the poll picks the new
+  // status up. The previous follow-up timer asked for 'ACTIVE', which the
+  // action map did not handle and which therefore fired a cancel request.
+  const broadcast = (id: string) => updateStatus(id, 'BROADCASTING');
 
   const critical = events.filter((event) => event.tier === 'CRITICAL' && event.status !== 'RESOLVED').length;
   const review = events.filter((event) => event.status === 'UNDER_REVIEW').length;

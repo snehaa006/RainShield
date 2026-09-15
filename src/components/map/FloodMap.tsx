@@ -205,10 +205,17 @@ export function FloodMap() {
   // A critical event selects its ward automatically. Move the camera there so
   // the operator immediately sees the affected geography rather than having to
   // find it manually. User panning/zooming is still respected afterwards.
+  //
+  // `wards` is read through a ref deliberately: its identity changes on every
+  // forecast refresh, and depending on it directly would yank the camera back
+  // to the selected ward once a minute while the operator is panning around.
+  // Only a change of selection should move the map.
+  const wardsRef = useRef(wards);
+  wardsRef.current = wards;
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready || !selectedWardId) return;
-    const ward = wards.find((item) => item.id === selectedWardId);
+    const ward = wardsRef.current.find((item) => item.id === selectedWardId);
     if (!ward) return;
     map.flyTo({ center: ward.centre, zoom: Math.max(map.getZoom(), 11.9), duration: 850 });
   }, [ready, selectedWardId]);
