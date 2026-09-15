@@ -83,6 +83,13 @@ DRAIN_RATE_MAX_PER_S = 1.0 / 1800.0
 #: Broad-crested weir coefficient for coastal discharge, m^(1/2)/s.
 WEIR_COEFFICIENT = 1.4
 
+#: Square root of the surface slope assumed at a domain edge that is not
+#: coast, for the free-outflow condition. 0.03 means a slope of ~9e-4, a
+#: gentle plain — Mumbai's eastern edge draining towards Thane creek. It only
+#: sets how fast water leaves a boundary that is outside the study area
+#: anyway, and it is accounted for in the mass balance either way.
+EDGE_SLOPE_SQRT = 0.03
+
 #: Base timestep, s. Sub-stepped further wherever stability demands it.
 BASE_TIMESTEP_S = 60.0
 
@@ -126,6 +133,11 @@ class MassBalance:
 
     rainfall: float = 0.0
     infiltration: float = 0.0
+    #: Water the positivity clip had to invent, m3. Should be exactly zero:
+    #: the sub-stepping limiter is meant to make a negative depth impossible.
+    #: It is tallied rather than trusted, so that if the timestep floor ever
+    #: binds, the closure error shows it instead of the clip hiding it.
+    created_by_clip: float = 0.0
     drained: float = 0.0
     pumped: float = 0.0
     to_sea: float = 0.0
@@ -135,7 +147,7 @@ class MassBalance:
 
     @property
     def inputs(self) -> float:
-        return self.rainfall + self.initial_storage
+        return self.rainfall + self.initial_storage + self.created_by_clip
 
     @property
     def outputs(self) -> float:
@@ -373,7 +385,10 @@ def solve(
             # Free outflow off the domain edge, at the local surface gradient.
             edge_q = np.where(
                 edge & (mobile > 0.0),
-                (1.0 / params.manning) * np.power(mobile, 5.0 / 3.0) * 0.03 * dx,
+                (1.0 / params.manning)
+                * np.power(mobile, 5.0 / 3.0)
+                * EDGE_SLOPE_SQRT
+                * dx,
                 0.0,
             )
 
@@ -406,7 +421,15 @@ def solve(
 
             leaving = (coastal_q + edge_q + drain_q + pump_q + infil_q) * dt
             h -= leaving / area
+
+            # Positivity. The limiter above is supposed to make this a no-op;
+            # if it ever is not, the water the clip invents is counted so the
+            # closure error reports the problem rather than absorbing it.
+            deficit = np.clip(-h, 0.0, None)
+            if deficit.any():
+                mass.created_by_clip += float((deficit * area).sum())
             np.clip(h, 0.0, None, out=h)
+            mass.created_by_clip += float((h[sea] * area).sum())
             h[sea] = 0.0
 
             mass.rainfall += float(delta.sum())
@@ -435,6 +458,11 @@ def solve(
         snapshots.setdefault(lead, h.copy())
 
     mass.final_storage = float((h * area).sum())
+    if mass.created_by_clip > 0.0:
+        notes.append(
+            f"positivity clip created {mass.created_by_clip:.3g} m3 — "
+            "the timestep floor bound, so the solve is not exactly conservative"
+        )
     if mass.closure_error > 1e-6:
         notes.append(f"mass closure {mass.closure_error:.2%} — larger than expected")
 

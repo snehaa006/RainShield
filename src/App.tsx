@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { EmergencyAlertOverlay } from '@/components/alerts/EmergencyAlertOverlay';
 import { AlertSystemProvider, useAlertSystem } from '@/hooks/useAlertSystem';
 import { API_BASE } from '@/lib/config';
+import { onBackendWaking } from '@/lib/api';
 import { DashboardProvider, useDashboard } from '@/hooks/useDashboard';
 import { Header } from '@/components/layout/Header';
 import { SimulatedBanner } from '@/components/layout/SimulatedBanner';
@@ -104,11 +105,18 @@ function Board({ view }: { view: ViewId }) {
   const { isLoading, error, refresh, region, storm } = useDashboard();
   const View = VIEW_COMPONENTS[view];
 
+  // A cold start is not a failure, but it looks exactly like one from here —
+  // a spinner that sits there for a minute. The client says when it is
+  // retrying so the wait can be explained rather than endured.
+  const [waking, setWaking] = useState(false);
+  useEffect(() => onBackendWaking(setWaking), []);
+
   if (error) {
     return (
       <Notice title="Cannot reach the inference API">
         <p className="text-[12px] leading-relaxed text-slate-400">{error}</p>
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
+          Already retried once after a timeout, so this is not a cold start.
           Expecting the backend at{' '}
           <code className="rounded bg-white/[0.06] px-1 py-0.5 text-slate-300">
             {API_BASE || window.location.origin}
@@ -129,10 +137,18 @@ function Board({ view }: { view: ViewId }) {
 
   if (isLoading) {
     return (
-      <Notice title="Loading live forecast">
-        <p className="text-[12px] leading-relaxed text-slate-400">
-          Pulling current observations and scoring the 1 km grid.
-        </p>
+      <Notice title={waking ? 'Waking the inference API' : 'Loading live forecast'}>
+        {waking ? (
+          <p className="text-[12px] leading-relaxed text-slate-400">
+            The backend sleeps after a quiet spell and takes up to a minute to
+            come back. The first request timed out on a cold start and is being
+            retried — no need to reload.
+          </p>
+        ) : (
+          <p className="text-[12px] leading-relaxed text-slate-400">
+            Pulling current observations and scoring the 1 km grid.
+          </p>
+        )}
       </Notice>
     );
   }

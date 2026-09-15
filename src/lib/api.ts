@@ -228,7 +228,37 @@ function regionParam(region?: string): Record<string, string> {
  * spinner with no end and no explanation. The backend now bounds its own waits
  * too; this is the backstop for the request never arriving at all.
  */
-const REQUEST_TIMEOUT_MS = 45_000;
+const REQUEST_TIMEOUT_MS = 90_000;
+
+/**
+ * Attempts to make before giving up, including the first.
+ *
+ * Render's free tier spins the instance down after about fifteen minutes of
+ * inactivity, and its own dashboard warns that waking it "can delay requests
+ * by 50 seconds or more". The first request after an idle period is therefore
+ * not a failure — it is a cold start — but the old 45 s budget expired before
+ * the instance finished booting, so the very first load of the day reliably
+ * showed "Cannot reach the inference API" on a backend that was working.
+ *
+ * Two attempts at 90 s cover a spin-up comfortably. The retry only applies to
+ * a timeout or a transport failure: a 4xx or 5xx is a real answer from a
+ * running server and repeating it would just be noise.
+ */
+const REQUEST_ATTEMPTS = 2;
+
+/** Notified while a retry is in flight, so the UI can explain the wait. */
+type WakeListener = (waking: boolean) => void;
+const wakeListeners = new Set<WakeListener>();
+
+/** Subscribe to "the backend appears to be asleep" transitions. */
+export function onBackendWaking(listener: WakeListener): () => void {
+  wakeListeners.add(listener);
+  return () => wakeListeners.delete(listener);
+}
+
+function announceWaking(waking: boolean) {
+  wakeListeners.forEach((listener) => listener(waking));
+}
 
 /** A caller's own abort signal, plus our timeout, as one signal. */
 function withTimeout(signal: AbortSignal | undefined, ms: number) {
@@ -256,37 +286,58 @@ async function request<T>(
   const url = new URL(`${API_BASE}${path}`, window.location.origin);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
 
-  const guard = withTimeout(signal, REQUEST_TIMEOUT_MS);
-  let response: Response;
-  try {
-    response = await fetch(url, { signal: guard.signal, headers: { Accept: 'application/json' } });
-  } catch (cause) {
-    // The caller aborting (a lead-time change, an unmount) is not an error.
-    if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
-    if (cause instanceof DOMException && cause.name === 'TimeoutError') {
-      throw new ApiError(
-        `The inference API did not respond within ${REQUEST_TIMEOUT_MS / 1000}s. ` +
-          'It may be waking from sleep — retry in a moment.',
-      );
+  let lastError: ApiError | null = null;
+
+  for (let attempt = 1; attempt <= REQUEST_ATTEMPTS; attempt += 1) {
+    const guard = withTimeout(signal, REQUEST_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        signal: guard.signal,
+        headers: { Accept: 'application/json' },
+      });
+    } catch (cause) {
+      // The caller aborting (a lead-time change, an unmount) is not an error.
+      if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
+
+      const timedOut = cause instanceof DOMException && cause.name === 'TimeoutError';
+      lastError = timedOut
+        ? new ApiError(
+            `The inference API did not respond within ${REQUEST_TIMEOUT_MS / 1000}s. ` +
+              'It may be waking from sleep — retry in a moment.',
+          )
+        : new ApiError(
+            `Cannot reach the inference API at ${API_BASE || window.location.origin}. ` +
+              'Check that the backend is running and VITE_API_BASE points at it.',
+          );
+
+      if (attempt < REQUEST_ATTEMPTS) {
+        // Only a timeout or a dropped connection is worth repeating; both look
+        // the same from a sleeping instance, and neither means "no".
+        announceWaking(true);
+        continue;
+      }
+      throw lastError;
+    } finally {
+      guard.done();
     }
-    throw new ApiError(
-      `Cannot reach the inference API at ${API_BASE || window.location.origin}. ` +
-        'Check that the backend is running and VITE_API_BASE points at it.',
-    );
-  } finally {
-    guard.done();
+
+    if (attempt > 1) announceWaking(false);
+
+    if (!response.ok) {
+      // A status code is a real answer from a running server, so it is never
+      // retried. FastAPI puts the useful message in `detail`.
+      const detail = await response
+        .json()
+        .then((body) => (typeof body?.detail === 'string' ? body.detail : null))
+        .catch(() => null);
+      throw new ApiError(detail ?? `${path} failed (HTTP ${response.status})`, response.status);
+    }
+
+    return response.json() as Promise<T>;
   }
 
-  if (!response.ok) {
-    // FastAPI puts the useful message in `detail`.
-    const detail = await response
-      .json()
-      .then((body) => (typeof body?.detail === 'string' ? body.detail : null))
-      .catch(() => null);
-    throw new ApiError(detail ?? `${path} failed (HTTP ${response.status})`, response.status);
-  }
-
-  return response.json() as Promise<T>;
+  throw lastError ?? new ApiError(`${path} failed`);
 }
 
 export const fetchRegions = (signal?: AbortSignal) =>

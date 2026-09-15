@@ -317,3 +317,24 @@ def test_more_susceptible_ground_reads_as_less_flooded_at_equal_depth():
     shallow = inundated_fraction(depth, np.full(1, DEPRESSION_STORAGE_MIN_M))[0]
     deep = inundated_fraction(depth, np.full(1, DEPRESSION_STORAGE_MAX_M))[0]
     assert shallow > deep
+
+
+def test_the_positivity_clip_never_has_to_invent_water():
+    """The sub-stepping limiter must make a negative depth impossible.
+
+    If the timestep floor ever binds, the clip would raise a negative depth to
+    zero and quietly create water. It is tallied rather than trusted, so this
+    asserts the tally stays at zero even under rainfall far past anything
+    physical.
+    """
+    for intensity in (60.0, 500.0, 1000.0):
+        result = solve(
+            _susceptibility("mumbai"),
+            _rain("mumbai", intensity),
+            _soil("mumbai"),
+            region_id="mumbai",
+            tide_override_m=5.0,
+        )
+        assert result.mass.created_by_clip == 0.0, f"clip fired at {intensity} mm/hr"
+        assert result.mass.closure_error < CLOSURE_TOLERANCE
+        assert result.notes == []

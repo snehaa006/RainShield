@@ -495,6 +495,17 @@ Without `VITE_API_BASE` the client calls its own origin, which on Vercel means
 On Render's free tier the API sleeps after inactivity, so the first request
 after a sleep pays a cold start of roughly a minute.
 
+> **A cold start is not a failure, and the client no longer reports it as one.**
+> Render's own dashboard warns that waking a free instance "can delay requests
+> by 50 seconds or more", which the client's original 45 s budget expired
+> before — so the first load after any quiet spell reliably showed "Cannot
+> reach the inference API" against a backend that was fine. The budget is now
+> 90 s and a timeout or dropped connection is retried once, with the board
+> saying it is waking the API rather than showing a spinner. A 4xx or 5xx is
+> never retried: that is a real answer from a running server. If the error card
+> does appear, it means the retry already happened and the problem is not a
+> cold start.
+
 > **The blueprint is not what Render is running.** The `rainshield-api` service
 > was created by hand rather than from `render.yaml`, so Render never reads this
 > file: it was pinned to branch `sneha` with no health check path while the
@@ -533,7 +544,7 @@ Four things compounded, and all four are fixed:
   of holding the connection open. A slow upstream makes the board *older*, not
   permanently blank.
 * **The client had no timeout.** It waited forever, so a slow backend rendered
-  as an endless spinner with no explanation. It now gives up at 45 s and says
+  as an endless spinner with no explanation. It now bounds the wait and says
   what happened.
 
 `RAINSHIELD_HTTP_TIMEOUT` also dropped from 25 s to 10 s: both feeds answer in
