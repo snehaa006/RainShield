@@ -205,6 +205,23 @@ class Settings:
     cors_origins: str = field(default_factory=lambda: os.getenv("RAINSHIELD_CORS_ORIGINS", "*"))
     #: Skip the neural net entirely and use the analytical susceptibility model.
     force_analytical: bool = field(default_factory=lambda: _flag("RAINSHIELD_FORCE_ANALYTICAL"))
+    #: Which hazard path serves the board.
+    #:
+    #: "heuristic" is the original per-cell response curve — susceptibility x
+    #: (1 - exp(-rain / 45 mm)) — which conserves nothing and is what every
+    #: number on the deployed dashboard currently comes from.
+    #:
+    #: "physics" routes water over the DEM with a mass-conserving
+    #: diffusive-wave solver instead (rainshield.hydro.solver). It moves every
+    #: figure on the board, so it is opt-in rather than the default: the two
+    #: should be compared side by side before the switch is thrown.
+    solver: str = field(
+        default_factory=lambda: os.getenv("RAINSHIELD_SOLVER", "heuristic").strip().lower()
+    )
+
+    @property
+    def use_physics_solver(self) -> bool:
+        return self.solver == "physics"
 
     @property
     def weights_path(self) -> Path:

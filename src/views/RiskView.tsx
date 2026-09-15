@@ -3,6 +3,7 @@ import { percent } from '@/lib/format';
 import { MetricsStrip } from '@/components/panels/MetricsStrip';
 import { NowcastTimeline } from '@/components/panels/NowcastTimeline';
 import { WhatIfSimulator } from '@/components/panels/WhatIfSimulator';
+import { SolverPanel } from '@/components/panels/SolverPanel';
 import { CellInspector } from '@/components/panels/CellInspector';
 import { RainfallTrend } from '@/components/charts/RainfallTrend';
 import { Panel } from '@/components/ui/Panel';
@@ -26,6 +27,7 @@ export function RiskView() {
         {/* Controls and reference on the left, output on the right. */}
         <div className="flex min-h-0 flex-col gap-3 overflow-y-auto scroll-thin xl:pr-0.5">
           <WhatIfSimulator />
+          <SolverPanel />
           <WeightsPanel />
         </div>
 

@@ -213,3 +213,16 @@ def test_drainage_does_not_disturb_the_hazard_model(client):
     client.get("/api/drainage?lead=60&tide=4.5&extra_rainfall=200")
     after = client.get("/api/forecast?lead=60").json()["cells"]
     assert before == after
+
+
+def test_forecast_reports_the_hazard_path(client):
+    """The board must always be able to say which model served it."""
+    solver = client.get("/api/forecast?lead=60").json()["solver"]
+    assert solver["mode"] in {"heuristic", "physics"}
+    assert solver["label"] and solver["note"]
+    if solver["mode"] == "heuristic":
+        assert solver["massConserving"] is False
+        assert solver["massClosure"] is None
+    else:
+        assert solver["massConserving"] is True
+        assert solver["massClosure"]["error"] < 1e-9

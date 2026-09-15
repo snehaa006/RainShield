@@ -31,6 +31,7 @@ import type {
   LeadTime,
   ModelStatus,
   PumpStationInfo,
+  SolverStatus,
   RegionDescriptor,
   ScoredCell,
   StormPhase,
@@ -74,6 +75,8 @@ interface DashboardValue extends DashboardState {
   confidence: 'LOW' | 'MEDIUM' | 'HIGH';
   feed: FeedStatus | null;
   model: ModelStatus | null;
+  /** Which hazard path served these numbers, and its mass closure. */
+  solver: SolverStatus | null;
   generatedAt: string | null;
   /** True before the first successful load. */
   isLoading: boolean;
@@ -296,6 +299,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     selectedWard,
     selectedCell,
     confidence: forecast?.confidence ?? 'MEDIUM',
+    solver: forecast?.solver ?? null,
     feed: forecast?.observation ?? null,
     model: forecast
       ? {

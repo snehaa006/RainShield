@@ -297,3 +297,34 @@ export interface TideState {
   springRangeM: number;
   basis: string;
 }
+
+/**
+ * Which hazard path produced the numbers, and how well it closed.
+ *
+ * The mass-balance figure is the checkable version of a PDE residual: the
+ * governing equation integrated over the whole domain and the whole run. The
+ * heuristic path reports none, because nothing about it is conserved — which
+ * is the point, so it is stated rather than omitted.
+ */
+export interface SolverStatus {
+  mode: 'heuristic' | 'physics';
+  label: string;
+  massConserving: boolean;
+  note: string;
+  massClosure: {
+    /** Residual as a fraction of everything that entered the domain. */
+    error: number;
+    residualM3: number;
+    rainfallM3: number;
+    toSeaM3: number;
+    pumpedM3: number;
+    drainedM3: number;
+    infiltratedM3: number;
+    offDomainM3: number;
+    storedM3: number;
+  } | null;
+  steps?: number;
+  elapsedMs?: number;
+  tideMCd?: number;
+  notes?: string[];
+}

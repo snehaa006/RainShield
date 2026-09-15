@@ -20,6 +20,7 @@ import type {
   ModelStatus,
   PumpStationInfo,
   RegionDescriptor,
+  SolverStatus,
   Stamp,
   StormPhase,
   TideState,
@@ -59,6 +60,7 @@ export interface ForecastPayload {
     weights_present: boolean;
     error: string | null;
   };
+  solver: SolverStatus;
   cells: {
     risk: number[];
     floodProbability: number[];

@@ -138,7 +138,90 @@ def _susceptibility_for(observation: LiveObservation, lead: int) -> np.ndarray:
     return value
 
 
+#: One solve covers every lead time, so it is memoised per observation and
+#: per what-if setting rather than run once per horizon.
+_SOLVE_CACHE: dict[tuple, object] = {}
+
+
+def _solve_for(observation: LiveObservation, what_if: WhatIf):
+    """The routed solution for this observation, computed at most once.
+
+    The heuristic runs the response curve independently at each lead, giving
+    six snapshots that do not follow from one another. The solver integrates a
+    single trajectory and records it passing each horizon, so one call serves
+    all six — and "+3 hr" is genuinely the state that "+1 hr" evolved into.
+    """
+    from rainshield.hydro.solver import solve
+
+    key = (
+        observation.region_id,
+        observation.fetched_at.isoformat(),
+        what_if.extra_rainfall,
+        what_if.soil_saturation,
+        what_if.drainage_capacity,
+    )
+    cached = _SOLVE_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    rain = {
+        lead: np.clip(
+            observation.rain_rate[lead] + what_if.extra_rainfall / 3.0, 0.0, None
+        )
+        for lead in LEAD_TIMES
+    }
+    soil = np.clip(observation.soil_moisture * what_if.soil_saturation, 0.0, None)
+
+    result = solve(
+        _susceptibility_for(observation, 0),
+        rain,
+        soil,
+        region_id=observation.region_id,
+        pump_availability=float(np.clip(what_if.drainage_capacity, 0.3, 1.2)),
+    )
+    if len(_SOLVE_CACHE) > 8:
+        _SOLVE_CACHE.clear()
+    _SOLVE_CACHE[key] = result
+    return result
+
+
+def _physics_hazard(
+    observation: LiveObservation, lead: int, what_if: WhatIf
+) -> HazardField:
+    """A HazardField built from routed depths rather than a response curve.
+
+    Depth, inundated fraction and onset all come from the solve. Rainfall is
+    passed through unchanged so the rainfall-driven parts of the composite
+    risk score keep meaning the same thing on both paths.
+    """
+    from rainshield.hydro.solver import inundated_fraction
+
+    result = _solve_for(observation, what_if)
+    depth = result.depth[lead]
+    fraction = inundated_fraction(depth, result.parameters.depression_storage)
+
+    onset = result.onset_minutes
+    tti = np.where(np.isfinite(onset) & (onset <= lead), onset, np.nan)
+
+    intensity = np.clip(
+        observation.rain_rate[lead] + what_if.extra_rainfall / 3.0, 0.0, None
+    )
+    return HazardField(
+        rainfall_intensity=intensity.astype(np.float32),
+        rainfall_3h=np.clip(
+            observation.rain_3h[lead] + what_if.extra_rainfall, 0.0, None
+        ).astype(np.float32),
+        flood_probability=fraction.astype(np.float32),
+        water_depth=depth.astype(np.float32),
+        time_to_inundation=tti.astype(np.float32),
+        susceptibility=_susceptibility_for(observation, lead).astype(np.float32),
+    )
+
+
 def _hazard_for(observation: LiveObservation, lead: int, what_if: WhatIf) -> HazardField:
+    if SETTINGS.use_physics_solver:
+        return _physics_hazard(observation, lead, what_if)
+
     susceptibility = _susceptibility_for(observation, lead)
     return compute_hazard(
         susceptibility,
@@ -416,6 +499,7 @@ def forecast_payload(
         "isSimulating": what_if.is_active(),
         "observation": observation_meta(observation),
         "model": model_status(),
+        "solver": _solver_meta(observation, what_if),
         "cells": {
             "risk": _round_list(risk, 4),
             "floodProbability": _round_list(hazard.flood_probability, 4),
@@ -653,4 +737,56 @@ def drainage_payload(
             "capacities, outfall invert levels, infiltration rates and tidal "
             "constants are all uncalibrated estimates. Defensible, not validated."
         ),
+    }
+
+
+def _solver_meta(observation: LiveObservation, what_if: WhatIf) -> dict:
+    """Which hazard path produced these numbers, and how well it closed.
+
+    The mass-balance figure is the cheap, honest version of a PDE residual:
+    it is the governing equation integrated over the whole domain and the
+    whole run, and it is checkable rather than asserted. On the heuristic path
+    there is nothing to report, because nothing is conserved — which is the
+    point the physics path exists to address, so it says so rather than
+    omitting the field.
+    """
+    if not SETTINGS.use_physics_solver:
+        return {
+            "mode": "heuristic",
+            "label": "Per-cell response curve",
+            "massConserving": False,
+            "note": (
+                "Susceptibility x (1 - exp(-rain / 45 mm)), evaluated per cell. "
+                "No routing between cells and no mass balance: rain landing on "
+                "a slope does not arrive in the basin below."
+            ),
+            "massClosure": None,
+        }
+
+    result = _solve_for(observation, what_if)
+    mass = result.mass
+    return {
+        "mode": "physics",
+        "label": "Diffusive-wave finite volume",
+        "massConserving": True,
+        "note": (
+            "Mass-conserving routing over the DEM with a tide-gated open coast. "
+            "The trained network supplies depression storage and drainage "
+            "deficiency; depth comes from conservation of mass."
+        ),
+        "massClosure": {
+            "error": float(mass.closure_error),
+            "residualM3": round(float(mass.residual), 6),
+            "rainfallM3": round(float(mass.rainfall), 1),
+            "toSeaM3": round(float(mass.to_sea), 1),
+            "pumpedM3": round(float(mass.pumped), 1),
+            "drainedM3": round(float(mass.drained), 1),
+            "infiltratedM3": round(float(mass.infiltration), 1),
+            "offDomainM3": round(float(mass.off_domain), 1),
+            "storedM3": round(float(mass.final_storage), 1),
+        },
+        "steps": result.steps,
+        "elapsedMs": round(result.elapsed_s * 1000.0, 1),
+        "tideMCd": round(result.tide.level_m, 3),
+        "notes": list(result.notes),
     }
