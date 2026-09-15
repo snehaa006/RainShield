@@ -22,6 +22,7 @@ application; set RAINSHIELD_USER_AGENT to include a contact address.
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import numpy as np
@@ -63,6 +64,10 @@ class MetNoProvider:
             )
         return response.json()
 
+    def _parse_point(self, lat: float, lon: float) -> tuple[list[datetime], list[float], list[float]]:
+        """Fetch and parse one mesh point. Safe to call from a worker thread."""
+        return self._parse(self._request_point(lat, lon))
+
     @staticmethod
     def _parse(payload: dict) -> tuple[list[datetime], list[float], list[float]]:
         """Extract (times, hourly precipitation mm, cloud cover %) from one point.
@@ -97,12 +102,18 @@ class MetNoProvider:
         now = datetime.now(timezone.utc)
         lats, lons = mesh_query_pairs(self.mesh_size)
 
+        # One request per point, issued in parallel. Sequentially this was the
+        # slowest thing in the system: a 3x3 mesh is nine round trips, so a
+        # timing-out upstream cost nine whole timeouts back to back — minutes,
+        # while the dashboard sat waiting. In parallel the chain costs one.
+        with ThreadPoolExecutor(max_workers=min(len(lats), 12)) as pool:
+            points = list(pool.map(self._parse_point, lats, lons))
+
         times: list[datetime] = []
         precip_rows: list[list[float]] = []
         cloud_rows: list[list[float]] = []
 
-        for lat, lon in zip(lats, lons):
-            point_times, precip, cloud = self._parse(self._request_point(lat, lon))
+        for point_times, precip, cloud in points:
             if not times:
                 times = point_times
             # Points can differ by an entry at the tail; clip to the shortest.

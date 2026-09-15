@@ -178,6 +178,34 @@ function regionParam(region?: string): Record<string, string> {
   return region ? { region } : {};
 }
 
+/**
+ * How long to wait for a response before giving up, ms.
+ *
+ * The client used to wait indefinitely, so a backend that was merely slow — a
+ * free-tier instance waking up, an upstream feed timing out — showed as a
+ * spinner with no end and no explanation. The backend now bounds its own waits
+ * too; this is the backstop for the request never arriving at all.
+ */
+const REQUEST_TIMEOUT_MS = 45_000;
+
+/** A caller's own abort signal, plus our timeout, as one signal. */
+function withTimeout(signal: AbortSignal | undefined, ms: number) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(new DOMException('timeout', 'TimeoutError')), ms);
+  const onAbort = () => controller.abort(signal?.reason);
+  if (signal) {
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  }
+  return {
+    signal: controller.signal,
+    done: () => {
+      window.clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    },
+  };
+}
+
 async function request<T>(
   path: string,
   params: Record<string, string> = {},
@@ -186,15 +214,25 @@ async function request<T>(
   const url = new URL(`${API_BASE}${path}`, window.location.origin);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
 
+  const guard = withTimeout(signal, REQUEST_TIMEOUT_MS);
   let response: Response;
   try {
-    response = await fetch(url, { signal, headers: { Accept: 'application/json' } });
+    response = await fetch(url, { signal: guard.signal, headers: { Accept: 'application/json' } });
   } catch (cause) {
-    if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
+    // The caller aborting (a lead-time change, an unmount) is not an error.
+    if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
+    if (cause instanceof DOMException && cause.name === 'TimeoutError') {
+      throw new ApiError(
+        `The inference API did not respond within ${REQUEST_TIMEOUT_MS / 1000}s. ` +
+          'It may be waking from sleep — retry in a moment.',
+      );
+    }
     throw new ApiError(
       `Cannot reach the inference API at ${API_BASE || window.location.origin}. ` +
         'Check that the backend is running and VITE_API_BASE points at it.',
     );
+  } finally {
+    guard.done();
   }
 
   if (!response.ok) {

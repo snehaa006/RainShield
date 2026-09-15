@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -32,6 +33,17 @@ log = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _cached: dict[str, LiveObservation] = {}
+
+#: One in-flight refresh per region, so concurrent callers share a single fetch.
+#: Each entry is (gate, started_at) — the start time so a refresh that somehow
+#: never finishes cannot wedge the region's feed shut forever.
+_inflight_lock = threading.Lock()
+_inflight: dict[str, tuple[threading.Event, float]] = {}
+
+#: A refresh older than this is presumed lost and a new one is allowed. Every
+#: upstream call is already bounded by RAINSHIELD_HTTP_TIMEOUT, so reaching this
+#: means something unforeseen — and a frozen feed is worse than a duplicate call.
+MAX_INFLIGHT_SECONDS = 300.0
 
 #: How many arrivals to keep per region. At the default 600 s cadence this is
 #: a little over four hours of history, which is all the feed view plots.
@@ -164,28 +176,25 @@ def clear_feed_log() -> None:
         _feed_log.clear()
 
 
+def clear_inflight() -> None:
+    """Forget any in-flight refresh. For tests; the threads finish harmlessly."""
+    with _inflight_lock:
+        _inflight.clear()
+
+
 # --------------------------------------------------------------------------
 # Fetch + cache
 # --------------------------------------------------------------------------
 
 
-def get_observation(
-    force_refresh: bool = False, region_id: str = PRIMARY_REGION_ID
-) -> LiveObservation:
-    """Return the current observation for a region, refetching when stale.
+def _run_chain(region_id: str) -> LiveObservation:
+    """Walk the provider chain once and return whatever it yields.
 
-    Providers are tried in order. If they all fail the last good observation is
-    reused; if there is none, the synthetic provider fills in. Anything that is
-    not a fresh live fetch is flagged degraded so the UI can say so rather than
-    silently presenting stale or invented numbers as live.
+    Never raises: if every source fails it degrades to the last good
+    observation, then to the synthetic field.
     """
-    get_region(region_id)  # validates the id
-    ttl = cadence_for(region_id)
-
     with _lock:
         cached = _cached.get(region_id)
-        if not force_refresh and cached is not None and cached.age_seconds() < ttl:
-            return cached
 
     failures: list[str] = []
     for provider in build_providers(region_id=region_id):
@@ -220,6 +229,94 @@ def get_observation(
     return observation
 
 
+def _start_fetch(region_id: str) -> threading.Event:
+    """Ensure exactly one refresh is in flight for a region, and return its gate.
+
+    Without this the fetch was a thundering herd: the dashboard asks for the
+    forecast and the trend in parallel, the warm-up thread is running too, and
+    the cache is empty, so three callers each walked the whole provider chain at
+    once — tripling the load on an upstream that rate-limits per IP, which is
+    the very thing that makes it slow.
+    """
+    now = time.monotonic()
+    with _inflight_lock:
+        existing = _inflight.get(region_id)
+        if existing is not None and now - existing[1] < MAX_INFLIGHT_SECONDS:
+            return existing[0]
+        if existing is not None:
+            log.warning(
+                "refresh for %s has been running %.0fs — starting another",
+                region_id,
+                now - existing[1],
+            )
+        gate = threading.Event()
+        _inflight[region_id] = (gate, now)
+
+    def run() -> None:
+        try:
+            _run_chain(region_id)
+        except Exception as exc:  # noqa: BLE001 — a refresh must never kill the thread
+            log.error("refresh for %s failed unexpectedly: %s", region_id, exc)
+        finally:
+            with _inflight_lock:
+                # Only clear the slot if it is still ours: a refresh presumed
+                # lost may have been replaced, and it must not evict its successor.
+                current = _inflight.get(region_id)
+                if current is not None and current[0] is gate:
+                    _inflight.pop(region_id, None)
+            gate.set()
+
+    threading.Thread(target=run, name=f"fetch-{region_id}", daemon=True).start()
+    return gate
+
+
+def get_observation(
+    force_refresh: bool = False,
+    region_id: str = PRIMARY_REGION_ID,
+    budget: float | None = None,
+) -> LiveObservation:
+    """Return the current observation for a region, refreshing when stale.
+
+    The refresh runs on a background thread and the caller waits at most
+    `budget` seconds for it. Past that it is served the last good observation —
+    flagged degraded and stale — rather than holding the request open. A slow
+    upstream should make the board *older*, not make it never load.
+    """
+    get_region(region_id)  # validates the id
+    ttl = cadence_for(region_id)
+
+    with _lock:
+        cached = _cached.get(region_id)
+    if not force_refresh and cached is not None and cached.age_seconds() < ttl:
+        return cached
+
+    gate = _start_fetch(region_id)
+    budget = SETTINGS.fetch_budget if budget is None else budget
+    if gate.wait(max(0.0, budget)):
+        with _lock:
+            fresh = _cached.get(region_id)
+        if fresh is not None:
+            return fresh
+
+    # The refresh is still running. Serve what we have; it will land shortly and
+    # the next poll, or the feed clock, will pick it up.
+    with _lock:
+        cached = _cached.get(region_id)
+    if cached is not None:
+        cached.degraded = True
+        note = f"upstream slow — served the previous observation after {budget:.0f}s"
+        if note not in cached.notes:
+            cached.notes.append(note)
+        return cached
+
+    # Nothing cached at all: first load against a slow upstream. A labelled
+    # synthetic field now beats a spinner for however long the feed takes.
+    observation = SyntheticProvider(region_id=region_id).fetch(
+        reason=f"live feed still loading after {budget:.0f}s — retrying in the background"
+    )
+    return observation
+
+
 def clear_cache(region_id: str | None = None) -> None:
     """Drop the cached observation for one region, or for all of them."""
     with _lock:
@@ -240,7 +337,10 @@ _stop = threading.Event()
 def _tick_once() -> None:
     for region_id in region_ids():
         try:
-            get_observation(region_id=region_id)
+            # The clock is the one caller that should wait for the network: it
+            # has nobody blocked behind it, and its whole job is to land the
+            # observation the request path declines to wait for.
+            get_observation(region_id=region_id, budget=120.0)
         except Exception as exc:  # noqa: BLE001 — one bad region must not stop the rest
             log.warning("scheduled refresh for %s failed: %s", region_id, exc)
 
@@ -300,6 +400,7 @@ __all__ = [
     "cadence_for",
     "clear_cache",
     "clear_feed_log",
+    "clear_inflight",
     "feed_log",
     "get_observation",
     "simulated_cadence",

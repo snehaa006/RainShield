@@ -312,6 +312,8 @@ GeoJSON features per refresh. Interactive docs at `/docs`.
 | --- | --- | --- |
 | `RAINSHIELD_PROVIDER` | `openmeteo` | preferred live source (`openmeteo`, `metno`); the others still follow as fallbacks. `synthetic` for an offline demo. Ignored by simulated regions, which never call out |
 | `RAINSHIELD_CACHE_TTL` | `600` | seconds an observation is reused |
+| `RAINSHIELD_HTTP_TIMEOUT` | `10` | per-request upstream timeout, seconds |
+| `RAINSHIELD_FETCH_BUDGET` | `12` | how long a request waits for an in-flight refresh before serving the previous observation |
 | `RAINSHIELD_SIM_CADENCE` | `RAINSHIELD_CACHE_TTL` | seconds between simulated observations |
 | `RAINSHIELD_SIM_PERIOD` | `90` | minutes for one full landfall cycle |
 | `RAINSHIELD_MESH` | `5` | upstream sample mesh per axis |
@@ -352,6 +354,32 @@ Without `VITE_API_BASE` the client calls its own origin, which on Vercel means
 
 On Render's free tier the API sleeps after inactivity, so the first request
 after a sleep pays a cold start of roughly a minute.
+
+### Why the first load used to take minutes
+
+Four things compounded, and all four are fixed:
+
+* **met.no was fetched serially.** A 3 × 3 mesh is nine HTTP requests, and they
+  ran one after another — so an upstream that was timing out cost nine whole
+  timeouts back to back, minutes of it, before the fallback chain gave up.
+  They now go out in parallel, so the chain costs one timeout, not nine.
+* **There was no single-flight.** The dashboard asks for `/api/forecast` and
+  `/api/series` in parallel and the warm-up thread runs alongside them, so a
+  cold cache had three callers each walking the whole provider chain at once —
+  tripling load on an upstream that rate-limits *per IP*, which is exactly what
+  makes it slow. One refresh now runs per region and the others wait on it.
+* **Requests waited for the network.** A refresh now runs on a background
+  thread and a request waits at most `RAINSHIELD_FETCH_BUDGET` seconds for it,
+  then serves the last good observation — flagged degraded and stale — instead
+  of holding the connection open. A slow upstream makes the board *older*, not
+  permanently blank.
+* **The client had no timeout.** It waited forever, so a slow backend rendered
+  as an endless spinner with no explanation. It now gives up at 45 s and says
+  what happened.
+
+`RAINSHIELD_HTTP_TIMEOUT` also dropped from 25 s to 10 s: both feeds answer in
+well under a second when healthy, so a long timeout only buys a longer wait on
+the days they are down — the days the board most needs to stay usable.
 
 ## Tests
 
