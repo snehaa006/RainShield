@@ -51,10 +51,32 @@ def _layer_norm(x: np.ndarray, weight: np.ndarray, bias: np.ndarray) -> np.ndarr
     return (x - mean) / np.sqrt(var + EPS_LN) * weight + bias
 
 
+#: Query rows attended at a time.
+#:
+#: Attention over a 45 x 39 grid is a sequence of 1755 tokens, so a full score
+#: matrix is 1755 x 1755 — 12 MB per head at float32, and softmax used to copy
+#: it twice more, putting ~37 MB live per head and three layers of that behind
+#: it. On a 512 MB instance running the forecast and the series endpoint at
+#: once that peaked near the cap and the worker was killed mid-request.
+#:
+#: Softmax is independent per row, so the scores can be built a block of
+#: queries at a time and the result is bit-identical. 256 rows costs 1.8 MB
+#: instead of 12 MB, which is the difference between fitting and not.
+ATTENTION_CHUNK = 256
+
+
 def _softmax(x: np.ndarray) -> np.ndarray:
     shifted = x - x.max(axis=-1, keepdims=True)
     exp = np.exp(shifted)
     return exp / exp.sum(axis=-1, keepdims=True)
+
+
+def _softmax_(x: np.ndarray) -> np.ndarray:
+    """Softmax along the last axis, in place. `x` must be owned by the caller."""
+    x -= x.max(axis=-1, keepdims=True)
+    np.exp(x, out=x)
+    x /= x.sum(axis=-1, keepdims=True)
+    return x
 
 
 def _self_attention(x: np.ndarray, p: dict, prefix: str, nhead: int) -> np.ndarray:
@@ -72,12 +94,18 @@ def _self_attention(x: np.ndarray, p: dict, prefix: str, nhead: int) -> np.ndarr
     v = v.reshape(seq, nhead, head_dim)
 
     # One 2-D GEMM per head: numpy dispatches these to BLAS, whereas a single
-    # batched 3-D matmul falls back to a much slower generic loop.
+    # batched 3-D matmul falls back to a much slower generic loop. Within a
+    # head the queries are blocked so the score matrix never exists in full —
+    # see ATTENTION_CHUNK.
     context = np.empty((seq, nhead, head_dim), dtype=x.dtype)
     scale = 1.0 / np.sqrt(head_dim)
     for h in range(nhead):
-        scores = (q[:, h] @ k[:, h].T) * scale          # (seq, seq)
-        context[:, h] = _softmax(scores) @ v[:, h]
+        q_h, k_h, v_h = q[:, h], k[:, h], v[:, h]
+        k_t = np.ascontiguousarray(k_h.T)
+        for start in range(0, seq, ATTENTION_CHUNK):
+            stop = min(start + ATTENTION_CHUNK, seq)
+            scores = (q_h[start:stop] @ k_t) * scale    # (chunk, seq)
+            context[start:stop, h] = _softmax_(scores) @ v_h
     context = context.reshape(seq, d_model)
 
     return context @ p[f"{prefix}.self_attn.out_proj.weight"].T + p[
